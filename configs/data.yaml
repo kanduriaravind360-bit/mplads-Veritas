@@ -1,0 +1,75 @@
+# Data loading + cleaning configuration for MPLADS Sentinel.
+# Per CLAUDE.md rule 5: thresholds and mappings live here, never hard-coded.
+
+seed: 42
+
+paths:
+  raw_xlsx: data/raw/MPLAD_Anomaly_Detection_Dataset.xlsx
+  sheet: Data
+  processed_parquet: data/processed/works.parquet
+
+# Snapshot date of the eSAKSHI extract. Any date after this is treated as a
+# data-entry error ("future date"). Set to null to use today's date instead.
+snapshot_date: 2026-08-31
+
+date_columns:
+  - recommended_date
+  - sanction_date
+  - completion_date
+  - latest_expenditure_date
+
+numeric_columns:
+  - sanction_amount
+  - amount_disbursed_completed
+  - total_fund_disbursed
+  - num_payments
+  - days_to_sanction
+  - days_since_sanction
+  - cost_zscore
+  - duration_days
+  - vendor_work_count
+
+text_columns:
+  - work_id
+  - chamber
+  - work_category
+  - state
+  - ida
+  - mp_name
+  - constituency
+  - work_description
+  - work_status
+  - vendor_name
+  - latest_payment_status
+  - flag_reasons
+
+# Canonical spellings. Source values are trimmed and collapsed on whitespace
+# before lookup; anything unmatched keeps its trimmed form.
+work_status_map:
+  "Sanction": "Sanctioned"
+  "Time Estimation": "Time Estimation"
+  "Vendor Identification": "Vendor Identification"
+  "Physical Inspection": "Physical Inspection"
+  "Work partially Completed": "Work Partially Completed"
+  "Work Completed": "Work Completed"
+
+work_category_map:
+  "Normal/Others": "Normal/Others"
+  "Repair and Renovation": "Repair and Renovation"
+  "Trust and Society": "Trust and Society"
+  "Bar and Associations": "Bar and Associations"
+
+missing_category_label: "Unknown"
+
+# LEAKAGE RULE (CLAUDE.md rule 3): these reproduce the proxy label and must
+# never be used as model input features.
+flag_weights:
+  flag_sanction_delay: 2
+  flag_stuck_work: 3
+  flag_cost_outlier: 3
+  flag_fast_completion: 2
+  flag_round_amount: 1
+  flag_vendor_concentration: 3
+  flag_payment_stuck: 1
+
+anomaly_label_threshold: 4

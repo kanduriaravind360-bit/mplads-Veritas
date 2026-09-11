@@ -1,0 +1,40 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+
+# Data artefacts (data/raw IS committed — private repo)
+data/processed/
+*.parquet
+
+# Trained models
+models/*.pkl
+models/*.joblib
+models/*.pt
+models/*.onnx
+models/*.bin
+models/*.safetensors
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

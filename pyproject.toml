@@ -1,0 +1,66 @@
+[project]
+name = "mplads-sentinel"
+version = "0.1.0"
+description = "AI platform flagging anomalies, fraud risk, delays and duplicate works in MPLADS data (SIH 2026, PS 26102, MoSPI)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+
+# NOTE ON PINS: this machine runs Windows Smart App Control in enforced mode,
+# which blocks compiled extension DLLs that have no reputation yet with the
+# Intelligent Security Graph. Brand-new releases of numpy/scipy/scikit-learn
+# get blocked at import. These pins are mature, widely-downloaded builds that
+# load cleanly. Do not bump them without re-testing imports on this machine.
+dependencies = [
+    # data
+    "numpy==2.1.3",
+    "scipy==1.15.2",
+    "pandas==2.2.3",
+    "pyarrow==25.0.1",
+    "openpyxl==3.1.5",
+    # ml
+    "scikit-learn==1.6.1",
+    "xgboost==2.1.4",
+    "lightgbm==4.5.0",
+    "shap==0.46.0",
+    "pyod==2.0.5",
+    "sentence-transformers==3.4.1",
+    # text / graph / utils
+    "rapidfuzz==3.11.0",
+    "networkx==3.4.2",
+    "pyyaml==6.0.3",
+    "joblib==1.4.2",
+    # api
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "sqlalchemy==2.0.36",
+    "pydantic==2.10.4",
+    "python-multipart==0.0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "ruff==0.9.2",
+    "matplotlib==3.10.0",
+    "seaborn==0.13.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "N", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
