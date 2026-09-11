@@ -28,7 +28,14 @@ import pandas as pd
 from ml.config import load_config
 from ml.detect_anomaly import FEATURE_FAMILY
 
-_SIGNALS: tuple[str, ...] = ("rule", "supervised", "unsupervised", "duplicate", "delay")
+_SIGNALS: tuple[str, ...] = (
+    "rule",
+    "supervised",
+    "unsupervised",
+    "cost",
+    "duplicate",
+    "delay",
+)
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -53,9 +60,14 @@ def format_inr(amount: float) -> str:
     return f"Rs {amount:,.0f}"
 
 
-def band_for(score: float, cfg: dict[str, Any]) -> str:
-    """Map a 0-100 score to its band."""
-    bands = cfg["risk"]["bands"]
+def band_for(score: float, cfg: dict[str, Any], cuts: dict[str, float] | None = None) -> str:
+    """Map a 0-100 score to its band.
+
+    ``cuts`` carries the score value at each boundary. When bands are defined by
+    percentile those are computed from the population by :func:`band_cutoffs`;
+    otherwise they come straight from config.
+    """
+    bands = cuts if cuts is not None else cfg["risk"]["bands"]
     if score >= float(bands["critical"]):
         return "Critical"
     if score >= float(bands["high"]):
@@ -63,6 +75,24 @@ def band_for(score: float, cfg: dict[str, Any]) -> str:
     if score >= float(bands["medium"]):
         return "Medium"
     return "Low"
+
+
+def band_cutoffs(scores: pd.Series, cfg: dict[str, Any]) -> dict[str, float]:
+    """Score value at each band boundary.
+
+    With ``band_method: percentile`` the boundaries are quantiles of the scored
+    population, which fixes review volume by design: Critical is the top 1%
+    however the underlying signals are scaled. Fixed thresholds drifted every
+    time a signal was rescaled, once putting 34% of works into High or Critical.
+    """
+    rcfg = cfg["risk"]
+    if str(rcfg.get("band_method", "absolute")) != "percentile":
+        return {k: float(v) for k, v in rcfg["bands"].items()}
+
+    pcts = rcfg["band_percentiles"]
+    return {
+        name: float(scores.quantile(float(pcts[name]))) for name in ("critical", "high", "medium")
+    }
 
 
 def fuse(signals: pd.DataFrame, is_open: pd.Series, cfg: dict[str, Any] | None = None) -> pd.Series:
@@ -136,7 +166,8 @@ def _rule_signal(df: pd.DataFrame, cfg: dict[str, Any]) -> pd.Series:
 
 
 def _split_signal(in_split: pd.Series) -> pd.Series:
-    return in_split.astype("float64")
+    """Split-group membership as a 0-1 score (0 when the work is in no group)."""
+    return in_split.astype("float64").clip(0.0, 1.0).fillna(0.0)
 
 
 def _delay_signal(delay_risk: pd.Series, is_open: pd.Series, cfg: dict[str, Any]) -> pd.Series:
@@ -357,22 +388,34 @@ def score(
     duplicate = pd.concat([dup_score.astype("float64"), _split_signal(in_split)], axis=1).max(
         axis=1
     )
+    unsupervised = anomaly_unsup.astype("float64")
+    # The expected-cost residual is its own channel. Folding it into the
+    # unsupervised one by taking a maximum discarded it whenever the Isolation
+    # Forest happened to score higher, wasting the strongest cost evidence the
+    # system has.
+    cost = (
+        df["cost_signal"].astype("float64")
+        if "cost_signal" in df.columns
+        else pd.Series(0.0, index=df.index)
+    )
     is_open = df["completion_date"].isna()
     signals = pd.DataFrame(
         {
             "rule": _rule_signal(df, cfg),
             "supervised": supervised_prob.astype("float64"),
-            "unsupervised": anomaly_unsup.astype("float64"),
+            "unsupervised": unsupervised,
+            "cost": cost,
             "duplicate": duplicate,
             "delay": _delay_signal(delay_risk, is_open, cfg),
         },
         index=df.index,
     )
     risk = fuse(signals, is_open, cfg)
+    cuts = band_cutoffs(risk, cfg)
 
     out = signals.copy()
     out["risk_score"] = risk.round(2)
-    out["band"] = [band_for(v, cfg) for v in risk]
+    out["band"] = [band_for(v, cfg, cuts) for v in risk]
     return out
 
 

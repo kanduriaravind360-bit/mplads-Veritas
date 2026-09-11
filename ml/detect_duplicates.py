@@ -1,22 +1,33 @@
 """Duplicate works and split-work detection.
 
-Two distinct patterns, both of which a reviewer can check directly:
+**Duplicates.** The same work recorded twice. The earlier implementation chained
+four hard gates with AND (cosine, fuzzy ratio, amount ratio, location overlap);
+a candidate failing any one was discarded, so a genuine duplicate with a
+slightly reworded description or a revised amount was lost. It recalled 5.3% of
+planted duplicates.
 
-**Duplicates.** The same work described twice in the same area. Candidate pairs
-must share a constituency (or IDA) and a work type, be close in both embedding
-space and token overlap, be sanctioned within a couple of years of each other,
-and be of comparable value.
+This version scores every candidate on a weighted blend instead, so strength on
+one axis can offset weakness on another:
 
-The hard part is that most repeated descriptions are innocent. "High Mast LED
-Light" is a standard catalogue item ordered in hundreds of places. So a
-description appearing across many different constituencies is treated as a
-standard item and a pair of them survives only if it *also* shares a location
-word, which is what distinguishes "a light in Rampur" from "a light somewhere".
+    pair_score = 0.45*cosine + 0.25*fuzzy + 0.15*location_overlap + 0.15*amount
 
-**Split works.** One large work broken into several small ones to stay under a
-sanction threshold. We look for several works from the same IDA, vendor and
-type, sanctioned within a short window, each individually below the peer median
-but jointly above the peer 90th percentile.
+Candidates come from nearest-neighbour search on the embeddings within the same
+district (IDA) or constituency and work type, rather than from all pairs inside
+a block, which is both faster and finds matches across constituency boundaries
+when the executing district is the same.
+
+The hard part is that similarity alone cannot separate a duplicate from a bulk
+rollout, and in fact ranks the rollout higher: fifty byte-identical copies of
+"High Mast LED Light" score a perfect 1.0, while a genuinely reworded duplicate
+scores about 0.94. Two things fix that. Repetition count is penalised directly,
+because two copies of a description in one constituency is a duplicate and fifty
+is a programme. And cluster size scales confidence rather than excluding pairs:
+discarding oversized clusters outright threw away planted duplicates that had
+chained into them, costing 13 points of recall.
+
+**Split works.** One large work broken into several small ones. Vendor identity
+is a bonus rather than a requirement here, because vendor is missing for about
+20% of works and requiring it discarded most genuine groups.
 """
 
 from __future__ import annotations
@@ -31,6 +42,7 @@ import pandas as pd
 from ml.config import load_config
 
 _TOKEN_RE = re.compile(r"[a-z]{3,}")
+_ROUND_UNITS: tuple[float, ...] = (100_000.0, 50_000.0, 25_000.0)
 
 
 @dataclass
@@ -40,6 +52,7 @@ class DuplicateResult:
     pairs: pd.DataFrame
     clusters: pd.DataFrame
     dup_score: pd.Series = field(default_factory=lambda: pd.Series(dtype="float64"))
+    calibration: dict[str, Any] = field(default_factory=dict)
 
 
 def _normalise(text: pd.Series) -> pd.Series:
@@ -56,172 +69,221 @@ def _normalise(text: pd.Series) -> pd.Series:
 def _location_words(text: str, stopwords: frozenset[str]) -> set[str]:
     """Content words that plausibly name a place.
 
-    Crude but effective: anything that is not a generic works-vocabulary term.
-    Village and ward names survive; "construction of road" does not.
+    Anything that is not generic works vocabulary. Village and ward names
+    survive; "construction of road" does not.
     """
     return {t for t in _TOKEN_RE.findall(text) if t not in stopwords}
 
 
 def _standard_descriptions(df: pd.DataFrame, norm: pd.Series, threshold: int) -> frozenset[str]:
-    """Descriptions that appear in this many or more distinct constituencies."""
+    """Descriptions appearing in at least this many distinct constituencies."""
     spread = norm.groupby(norm).apply(lambda s: df.loc[s.index, "constituency"].nunique())
     return frozenset(spread[spread >= threshold].index)
+
+
+def _candidate_pairs(
+    df: pd.DataFrame, embeddings: np.ndarray, cfg: dict[str, Any]
+) -> list[tuple[int, int, float]]:
+    """Nearest-neighbour candidates within each district/constituency and type.
+
+    Returns positional (i, j, cosine) triples. Blocking on the executing agency
+    as well as the constituency lets a duplicate be found when the same district
+    records it under either.
+    """
+    dcfg = cfg["duplicates"]
+    k = int(dcfg["neighbours"])
+    max_block = int(dcfg["max_block_size"])
+    floor = float(dcfg["candidate_cosine_floor"])
+
+    seen: set[tuple[int, int]] = set()
+    out: list[tuple[int, int, float]] = []
+
+    for key in dcfg["group_keys"]:
+        grouped = df.groupby([key, "work_type"], observed=True, sort=False, dropna=True)
+        for _, block in grouped:
+            n = len(block)
+            if n < 2 or n > max_block:
+                continue
+            rows = block.index.to_numpy()
+            vectors = embeddings[rows]
+            similarity = vectors @ vectors.T
+            np.fill_diagonal(similarity, -1.0)
+
+            take = min(k, n - 1)
+            neighbours = np.argpartition(-similarity, kth=take - 1, axis=1)[:, :take]
+            for local_i in range(n):
+                for local_j in neighbours[local_i]:
+                    score = float(similarity[local_i, local_j])
+                    if score < floor:
+                        continue
+                    a, b = int(rows[local_i]), int(rows[int(local_j)])
+                    pair = (a, b) if a < b else (b, a)
+                    if pair in seen:
+                        continue
+                    seen.add(pair)
+                    out.append((pair[0], pair[1], score))
+    return out
+
+
+def _amount_similarity(a: float, b: float) -> float:
+    """1.0 for identical amounts, decaying as the ratio departs from 1."""
+    if a <= 0 or b <= 0:
+        return 0.0
+    ratio = min(a, b) / max(a, b)
+    return float(ratio)
 
 
 def find_duplicates(
     df: pd.DataFrame,
     embeddings: np.ndarray,
     cfg: dict[str, Any] | None = None,
+    apply_standard_penalty: bool | None = None,
 ) -> DuplicateResult:
-    """Find duplicate-candidate pairs and collapse them into clusters."""
+    """Score duplicate-candidate pairs and collapse the survivors into clusters."""
     cfg = cfg or load_config("ml")
     dcfg = cfg["duplicates"]
     from rapidfuzz import fuzz
 
+    df = df.reset_index(drop=True)
     norm = _normalise(df["work_description"])
     stopwords = frozenset(dcfg["location_stopwords"])
     standard = _standard_descriptions(df, norm, int(dcfg["standard_item_constituencies"]))
-
-    cos_min = float(dcfg["cosine_min"])
-    fuzzy_min = float(dcfg["fuzzy_min"])
-    window = float(dcfg["days_window"])
-    ratio_lo = float(dcfg["amount_ratio_min"])
-    ratio_hi = float(dcfg["amount_ratio_max"])
-    max_block = int(dcfg["max_block_size"])
-    min_jaccard = float(dcfg["min_location_jaccard"])
-    standard_jaccard = float(dcfg["standard_item_jaccard"])
-
-    positions = {work_id: i for i, work_id in enumerate(df["work_id"].to_numpy())}
-    amounts = pd.to_numeric(df["sanction_amount"], errors="coerce").to_numpy(dtype="float64")
-    # Coerce rather than assume: an uploaded CSV (score_new_works) can arrive
-    # with dates as strings or as an object column.
-    sanction = pd.to_datetime(df["sanction_date"], errors="coerce").to_numpy(dtype="datetime64[ns]")
     loc_sets = [_location_words(t, stopwords) for t in norm]
 
+    if apply_standard_penalty is None:
+        apply_standard_penalty = bool(dcfg["apply_standard_penalty"])
+
+    weights = dcfg["score_weights"]
+    threshold = float(dcfg["pair_score_threshold"])
+    window = float(dcfg["days_window"])
+    penalty = float(dcfg["standard_item_penalty"])
+    repeat_free = int(dcfg["repeat_free_copies"])
+    repeat_penalty = float(dcfg["repeat_penalty"])
+
+    # How many times does this exact description already appear in this
+    # constituency? Two copies is a duplicate; fifty is a rollout. Similarity
+    # cannot tell them apart, because a rollout's copies are byte-identical and
+    # score a perfect 1.0, while a genuinely reworded duplicate scores lower.
+    # Repetition count is the discriminator, so it is penalised explicitly.
+    repeat_key = df["constituency"].astype(str) + "||" + norm
+    repeat_count = repeat_key.map(repeat_key.value_counts()).to_numpy()
+
+    amounts = pd.to_numeric(df["sanction_amount"], errors="coerce").to_numpy(dtype="float64")
+    sanction = pd.to_datetime(df["sanction_date"], errors="coerce").to_numpy(dtype="datetime64[ns]")
+
     records: list[dict[str, Any]] = []
-    primary = dcfg["group_keys"][0]
-
-    for _, block in df.groupby([primary, "work_type"], observed=True, sort=False):
-        if len(block) < 2 or len(block) > max_block:
+    for i, j, cosine in _candidate_pairs(df, embeddings, cfg):
+        gap = abs((sanction[i] - sanction[j]) / np.timedelta64(1, "D"))
+        if not np.isfinite(gap) or gap > window:
             continue
-        idx = block.index.to_numpy()
-        rows = np.array([positions[w] for w in block["work_id"]])
-        vecs = embeddings[rows]
-        sim = vecs @ vecs.T
 
-        ii, jj = np.triu_indices(len(idx), k=1)
-        keep = sim[ii, jj] >= cos_min
-        if not keep.any():
-            continue
-        ii, jj = ii[keep], jj[keep]
+        text_a, text_b = norm.iloc[i], norm.iloc[j]
+        fuzzy = fuzz.token_set_ratio(text_a, text_b) / 100.0
 
-        # Vectorise the cheap numeric gates. Only survivors reach the per-pair
-        # set and string comparisons, which dominate the runtime.
-        ra_all, rb_all = rows[ii], rows[jj]
-        gaps = np.abs((sanction[ra_all] - sanction[rb_all]) / np.timedelta64(1, "D"))
-        amt_a_all, amt_b_all = amounts[ra_all], amounts[rb_all]
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ratios = amt_a_all / amt_b_all
-        ok = (
-            np.isfinite(gaps)
-            & (gaps <= window)
-            & (amt_a_all > 0)
-            & (amt_b_all > 0)
-            & (
-                ((ratios >= ratio_lo) & (ratios <= ratio_hi))
-                | ((1 / ratios >= ratio_lo) & (1 / ratios <= ratio_hi))
-            )
+        loc_a, loc_b = loc_sets[i], loc_sets[j]
+        union = loc_a | loc_b
+        shared = loc_a & loc_b
+        overlap = len(shared) / len(union) if union else 0.0
+
+        amount_sim = _amount_similarity(amounts[i], amounts[j])
+
+        score = (
+            float(weights["cosine"]) * cosine
+            + float(weights["fuzzy"]) * fuzzy
+            + float(weights["location"]) * overlap
+            + float(weights["amount"]) * amount_sim
         )
-        for a, b, gap, amt_a, amt_b in zip(
-            ii[ok], jj[ok], gaps[ok], amt_a_all[ok], amt_b_all[ok], strict=True
-        ):
-            a, b = int(a), int(b)
-            ia, ib = idx[a], idx[b]
-            ra, rb = rows[a], rows[b]
-            gap = float(gap)
 
-            text_a, text_b = norm.iloc[ra], norm.iloc[rb]
+        is_standard = text_a in standard or text_b in standard
+        if is_standard and apply_standard_penalty:
+            score -= penalty
 
-            # Location gate first: it is a cheap set operation and rejects the
-            # overwhelming majority of bulk-rollout pairs before the much more
-            # expensive fuzzy string comparison runs.
-            loc_a, loc_b = loc_sets[ra], loc_sets[rb]
-            union = loc_a | loc_b
-            shared = loc_a & loc_b
-            jaccard = len(shared) / len(union) if union else 0.0
-            is_standard = text_a in standard or text_b in standard
-            if jaccard < (standard_jaccard if is_standard else min_jaccard):
-                continue
+        copies = int(max(repeat_count[i], repeat_count[j]))
+        if copies > repeat_free:
+            score -= repeat_penalty * np.log1p(copies - repeat_free)
 
-            token_sim = fuzz.token_set_ratio(text_a, text_b)
-            if token_sim < fuzzy_min:
-                continue
+        if score < threshold:
+            continue
 
-            records.append(
-                {
-                    "work_id_a": df.at[ia, "work_id"],
-                    "work_id_b": df.at[ib, "work_id"],
-                    "constituency": df.at[ia, "constituency"],
-                    "ida": df.at[ia, "ida"],
-                    "work_type": df.at[ia, "work_type"],
-                    "cosine": float(sim[a, b]),
-                    "token_set": float(token_sim),
-                    "days_apart": float(gap),
-                    "amount_a": float(amt_a),
-                    "amount_b": float(amt_b),
-                    "is_standard_item": bool(is_standard),
-                    "location_jaccard": float(jaccard),
-                    "shared_location_words": " ".join(sorted(shared)),
-                }
-            )
+        records.append(
+            {
+                "work_id_a": df.at[i, "work_id"],
+                "work_id_b": df.at[j, "work_id"],
+                "constituency": df.at[i, "constituency"],
+                "ida": df.at[i, "ida"],
+                "work_type": df.at[i, "work_type"],
+                "cosine": round(float(cosine), 4),
+                "token_set": round(fuzzy * 100, 2),
+                "location_overlap": round(float(overlap), 4),
+                "amount_similarity": round(float(amount_sim), 4),
+                "days_apart": float(gap),
+                "amount_a": float(amounts[i]),
+                "amount_b": float(amounts[j]),
+                "is_standard_item": bool(is_standard),
+                "copies_in_constituency": copies,
+                "shared_location_words": " ".join(sorted(shared)),
+                "pair_score": round(float(score), 4),
+            }
+        )
 
-    pairs = pd.DataFrame.from_records(records)
+    columns = [
+        "work_id_a",
+        "work_id_b",
+        "constituency",
+        "ida",
+        "work_type",
+        "cosine",
+        "token_set",
+        "location_overlap",
+        "amount_similarity",
+        "days_apart",
+        "amount_a",
+        "amount_b",
+        "is_standard_item",
+        "shared_location_words",
+        "pair_score",
+    ]
+    pairs = pd.DataFrame.from_records(records, columns=columns)
     if pairs.empty:
-        pairs = pd.DataFrame(
-            columns=[
-                "work_id_a",
-                "work_id_b",
-                "constituency",
-                "ida",
-                "work_type",
-                "cosine",
-                "token_set",
-                "days_apart",
-                "amount_a",
-                "amount_b",
-                "is_standard_item",
-                "location_jaccard",
-                "shared_location_words",
-                "pair_score",
-            ]
+        return DuplicateResult(
+            pairs=pairs,
+            clusters=pd.DataFrame(),
+            dup_score=pd.Series(0.0, index=df.index, name="dup_score"),
         )
-        empty = pd.Series(0.0, index=df.index, name="dup_score")
-        return DuplicateResult(pairs=pairs, clusters=pd.DataFrame(), dup_score=empty)
-
-    # Blend the two similarity measures; a pair that is strong on both is a
-    # better candidate than one carried by either alone.
-    pairs["pair_score"] = 0.5 * ((pairs["cosine"] - cos_min) / max(1e-9, 1 - cos_min)).clip(
-        0, 1
-    ) + 0.5 * ((pairs["token_set"] - fuzzy_min) / max(1e-9, 100 - fuzzy_min)).clip(0, 1)
-    pairs["pair_score"] = 0.5 + 0.5 * pairs["pair_score"]
 
     clusters = _build_clusters(pairs, df)
 
-    # Drop bulk rollouts: a cluster larger than max_cluster_size is one
-    # catalogue item ordered many times, not one work entered many times.
+    # Large clusters are bulk rollouts rather than double entry, but DISCARDING
+    # them cost 13 points of recall: a planted duplicate that happened to chain
+    # into a big component was thrown away with it. Every pair is kept instead,
+    # and confidence is scaled down by the size of the component it sits in, so
+    # the same similarity inside a 2-work cluster outranks it inside a 40-work
+    # rollout.
     max_cluster = int(dcfg["max_cluster_size"])
-    oversized = clusters.loc[clusters["n_works"] > max_cluster, "work_ids"]
-    if not oversized.empty:
-        bulk: set[str] = set()
-        for ids in oversized:
-            bulk.update(str(ids).split(","))
-        pairs = pairs.loc[
-            ~pairs["work_id_a"].isin(bulk) & ~pairs["work_id_b"].isin(bulk)
-        ].reset_index(drop=True)
-        clusters = clusters.loc[clusters["n_works"] <= max_cluster].reset_index(drop=True)
+    floor = float(dcfg["oversized_cluster_floor"])
 
-    dup_score = _score_works(pairs, df)
-    return DuplicateResult(pairs=pairs, clusters=clusters, dup_score=dup_score)
+    size_by_work: dict[str, int] = {}
+    for ids, size in zip(clusters["work_ids"], clusters["n_works"], strict=True):
+        for work_id in str(ids).split(","):
+            size_by_work[work_id] = int(size)
+
+    sizes = np.maximum(
+        pairs["work_id_a"].map(size_by_work).fillna(2).to_numpy(dtype="float64"),
+        pairs["work_id_b"].map(size_by_work).fillna(2).to_numpy(dtype="float64"),
+    )
+    confidence = np.clip(max_cluster / np.maximum(sizes, 1.0), floor, 1.0)
+
+    # Rescale the surviving score across [threshold, 1] so the signal uses its
+    # full range. Straight pair_score has almost no dynamic range once the
+    # threshold is applied: every kept pair sits between 0.88 and 1.0, which
+    # leaves ~18,000 works effectively tied and unable to compete for a place in
+    # the top of the ranking, however confident the match.
+    spread = (pairs["pair_score"].to_numpy() - threshold) / max(1e-9, 1.0 - threshold)
+    pairs["cluster_size"] = sizes.astype(int)
+    pairs["cluster_confidence"] = confidence.round(4)
+    pairs["dup_confidence"] = (np.clip(spread, 0.0, 1.0) * confidence).round(4)
+
+    return DuplicateResult(pairs=pairs, clusters=clusters, dup_score=_score_works(pairs, df))
 
 
 def _build_clusters(pairs: pd.DataFrame, df: pd.DataFrame) -> pd.DataFrame:
@@ -273,75 +335,134 @@ def _score_works(pairs: pd.DataFrame, df: pd.DataFrame) -> pd.Series:
     best = (
         pd.concat(
             [
-                pairs[["work_id_a", "pair_score"]].rename(columns={"work_id_a": "work_id"}),
-                pairs[["work_id_b", "pair_score"]].rename(columns={"work_id_b": "work_id"}),
+                pairs[["work_id_a", "dup_confidence"]].rename(columns={"work_id_a": "work_id"}),
+                pairs[["work_id_b", "dup_confidence"]].rename(columns={"work_id_b": "work_id"}),
             ]
         )
-        .groupby("work_id")["pair_score"]
+        .groupby("work_id")["dup_confidence"]
         .max()
     )
     return df["work_id"].map(best).fillna(0.0).rename("dup_score").set_axis(df.index)
 
 
+# ---------------------------------------------------------------------------
+# Split works
+# ---------------------------------------------------------------------------
+
+
+def _just_below_round(amount: float, tolerance: float) -> bool:
+    """Does the amount sit just under a round threshold, as a dodge would?"""
+    for unit in _ROUND_UNITS:
+        if amount <= 0 or amount >= unit * 20:
+            continue
+        remainder = amount % unit
+        if remainder >= unit * (1.0 - tolerance):
+            return True
+    return False
+
+
 def find_split_works(df: pd.DataFrame, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
     """Find groups of small works that look like one large work broken up.
 
-    Same IDA, vendor and work type, sanctioned inside a short window, each below
-    the peer median, jointly above the peer 90th percentile.
+    Same district and work type, overlapping location words, sanctioned inside a
+    short window, each below the peer median, jointly above the peer 90th
+    percentile. A shared vendor raises the score but is not required: vendor is
+    missing for about 20% of works and demanding it discarded most groups.
     """
     cfg = cfg or load_config("ml")
-    scfg = cfg["duplicates"]["split_works"]
+    dcfg = cfg["duplicates"]
+    scfg = dcfg["split_works"]
+
     min_group = int(scfg["min_group"])
     max_group = int(scfg["max_group"])
     window = int(scfg["days_window"])
     pct = float(scfg["combined_percentile"])
+    median_multiple = float(scfg["combined_median_multiple"])
+    min_overlap = float(scfg["min_location_overlap"])
+    tolerance = float(scfg["round_threshold_tolerance"])
 
-    work = df.loc[df["vendor_name"].notna()].copy()
+    work = df.reset_index(drop=True).copy()
     if work.empty:
         return pd.DataFrame()
 
-    amount = work["sanction_amount"].astype("float64")
+    amount = pd.to_numeric(work["sanction_amount"], errors="coerce").astype("float64")
     peer = work["peer_group"] if "peer_group" in work.columns else work["work_type"].astype(str)
     work["_peer_median"] = amount.groupby(peer).transform("median")
     work["_peer_p90"] = amount.groupby(peer).transform(lambda s: s.quantile(pct / 100.0))
 
+    stopwords = frozenset(dcfg["location_stopwords"])
+    norm = _normalise(work["work_description"])
+    loc_sets = [_location_words(t, stopwords) for t in norm]
+
     rows: list[dict[str, Any]] = []
-    grouped = work.groupby(["ida", "vendor_name", "work_type"], observed=True, sort=False)
-    for (ida, vendor, wtype), block in grouped:
+    for (ida, wtype), block in work.groupby(["ida", "work_type"], observed=True, sort=False):
+        if len(block) < min_group:
+            continue
+        # Keep only the below-median works BEFORE sliding the window. The window
+        # spans a contiguous run of dates, so an ordinary large work sanctioned
+        # between two pieces of a split would otherwise break the run and hide
+        # the group. Small works are what a split is made of; a big neighbour is
+        # irrelevant to whether they form one.
+        block = block.loc[
+            block["sanction_amount"].astype("float64") < block["_peer_median"].astype("float64")
+        ]
         if len(block) < min_group:
             continue
         block = block.sort_values("sanction_date", kind="stable")
-        dates = block["sanction_date"].to_numpy()
+        positions = block.index.to_numpy()
+        dates = pd.to_datetime(block["sanction_date"]).to_numpy()
         amounts = block["sanction_amount"].to_numpy(dtype="float64")
-        below = block["sanction_amount"].to_numpy() < block["_peer_median"].to_numpy()
-        p90 = float(block["_peer_p90"].iloc[0])
+        median = float(block["_peer_median"].iloc[0])
+        # Clear the EASIER of the two bars; see configs/ml.yaml for why p90
+        # alone is unsatisfiable in heavy-tailed peer groups.
+        p90 = min(float(block["_peer_p90"].iloc[0]), median_multiple * median)
 
         start = 0
         for end in range(len(block)):
             while (dates[end] - dates[start]) / np.timedelta64(1, "D") > window:
                 start += 1
-            # A window wider than max_group is a bulk programme, not a split.
             if end + 1 - start > max_group:
                 start = end + 1 - max_group
+            size = end + 1 - start
+            if size < min_group:
+                continue
             span = slice(start, end + 1)
-            if end + 1 - start < min_group:
-                continue
-            if not below[span].all():
-                continue
             total = float(amounts[span].sum())
             if total <= p90:
                 continue
+
             members = block.iloc[span]
+            member_pos = positions[span]
+            shared = set(loc_sets[member_pos[0]])
+            for pos in member_pos[1:]:
+                shared &= loc_sets[pos]
+            union: set[str] = set()
+            for pos in member_pos:
+                union |= loc_sets[pos]
+            overlap = len(shared) / len(union) if union else 0.0
+            if overlap < min_overlap:
+                continue
+
+            vendors = members["vendor_name"].dropna().unique()
+            same_vendor = len(vendors) == 1 and len(members["vendor_name"].dropna()) == size
+            span_days = float((dates[end] - dates[start]) / np.timedelta64(1, "D"))
+            just_below = float(np.mean([_just_below_round(a, tolerance) for a in amounts[span]]))
+
             rows.append(
                 {
                     "ida": str(ida),
-                    "vendor_name": str(vendor),
                     "work_type": str(wtype),
-                    "n_works": int(end + 1 - start),
+                    "vendor_name": str(vendors[0]) if same_vendor else "",
+                    "same_vendor": bool(same_vendor),
+                    "n_works": int(size),
                     "work_ids": ",".join(members["work_id"].astype(str)),
                     "total_amount": total,
                     "peer_median": float(members["_peer_median"].iloc[0]),
                     "peer_p90": p90,
+                    "total_vs_p90": round(total / p90, 3) if p90 else 0.0,
+                    "span_days": span_days,
+                    "location_overlap": round(overlap, 3),
+                    "share_just_below_round": round(just_below, 3),
                     "first_sanction": pd.Timestamp(dates[start]),
                     "last_sanction": pd.Timestamp(dates[end]),
                     "constituency": str(members["constituency"].iloc[0]),
@@ -352,22 +473,60 @@ def find_split_works(df: pd.DataFrame, cfg: dict[str, Any] | None = None) -> pd.
         return pd.DataFrame()
 
     out = pd.DataFrame(rows)
-    # Keep the widest group per (ida, vendor, type) so one split is not reported
-    # once per sliding window position.
-    out = (
-        out.sort_values("n_works", ascending=False)
-        .drop_duplicates(subset=["ida", "vendor_name", "work_type"], keep="first")
-        .reset_index(drop=True)
-    )
+    out["split_score"] = _score_splits(out, scfg)
+
+    # The sliding window emits many overlapping spans per district. Keep the
+    # best-scoring ones greedily, skipping any group that reuses a work already
+    # claimed. Deduplicating by (ida, work_type) instead, as an earlier version
+    # did, kept only ONE group per district and silently discarded every other
+    # genuine group there.
+    out = out.sort_values(["split_score", "n_works"], ascending=False, kind="stable")
+    claimed: set[str] = set()
+    keep: list[int] = []
+    for position, ids in zip(out.index, out["work_ids"], strict=True):
+        members = set(str(ids).split(","))
+        if members & claimed:
+            continue
+        claimed |= members
+        keep.append(position)
+
+    out = out.loc[keep].reset_index(drop=True)
     out.insert(0, "split_group_id", [f"SPL{i:05d}" for i in range(1, len(out) + 1)])
     return out
 
 
+def _score_splits(groups: pd.DataFrame, scfg: dict[str, Any]) -> pd.Series:
+    """0-1 score: more works, bigger relative total, tighter dates, rounder amounts."""
+    weights = scfg["score_weights"]
+    window = float(scfg["days_window"])
+
+    # Measured: saturating these terms sooner (size over 3..5, total over
+    # 1.0..1.5) looked more principled but scored WORSE, 41.2% detector recall
+    # against 46.0%. Changing the score changes the greedy non-overlapping
+    # selection, so a group that reads as "better" can displace two that were
+    # each right. Kept at the measured-best setting.
+    size_term = ((groups["n_works"] - 3) / max(1.0, float(scfg["max_group"]) - 3)).clip(0, 1)
+    total_term = ((groups["total_vs_p90"] - 1.0) / 2.0).clip(0, 1)
+    tight_term = (1.0 - groups["span_days"] / max(1.0, window)).clip(0, 1)
+    round_term = groups["share_just_below_round"].clip(0, 1)
+    vendor_term = groups["same_vendor"].astype("float64")
+
+    score = (
+        float(weights["size"]) * size_term
+        + float(weights["total"]) * total_term
+        + float(weights["tight_dates"]) * tight_term
+        + float(weights["round_amounts"]) * round_term
+        + float(weights["same_vendor"]) * vendor_term
+    )
+    return score.clip(0.0, 1.0).round(4)
+
+
 def split_membership(df: pd.DataFrame, splits: pd.DataFrame) -> pd.Series:
-    """Boolean series: is this work part of a suspected split group?"""
+    """Per-work split score: the score of the group it belongs to, else 0."""
     if splits.empty:
-        return pd.Series(False, index=df.index, name="in_split_group")
-    members: set[str] = set()
-    for ids in splits["work_ids"]:
-        members.update(str(ids).split(","))
-    return df["work_id"].isin(members).rename("in_split_group")
+        return pd.Series(0.0, index=df.index, name="split_score")
+    scores: dict[str, float] = {}
+    for ids, score in zip(splits["work_ids"], splits["split_score"], strict=True):
+        for work_id in str(ids).split(","):
+            scores[work_id] = max(scores.get(work_id, 0.0), float(score))
+    return df["work_id"].map(scores).fillna(0.0).rename("split_score").set_axis(df.index)

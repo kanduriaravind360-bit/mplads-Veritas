@@ -86,9 +86,20 @@ state, district, constituency and vendor roll-ups. Leakage is enforced in code b
 how learnable the hand-written rules are, **not** fraud detection; the caveat
 ships inside `models/metrics.json`. Full run: 165 seconds on an RTX 5060.
 
-Honest limitation: the synthetic injection test recalls only 5-18% of planted
-anomalies within the top 5% of the ranking. The detectors fire reliably on fast
-completions (100%) but on roughly half of cost inflations and duplicates, and on
-few split groups. Peer price variation in this data is genuinely wide, so a
-fourfold overcharge is under three robust deviations from its peer median.
-Improving detector sensitivity is the main open task. See `models/metrics.json`.
+**Step 2b — improved detectors + calibrated risk bands.** The cost signal is now
+an expected-cost model rather than a peer-group statistic: it predicts
+`log(sanction_amount)` from work type, state, quantities parsed from the
+description and the embedding reduced by SVD, out-of-fold so no work prices
+itself. MAE is 0.340 log-rupees, a typical error of 1.4x, R² 0.768.
+
+Duplicate detection replaced a chain of hard gates with a weighted pair score
+over nearest-neighbour candidates, and split detection made vendor identity
+optional. Risk bands became percentile cut-offs, fixing the review queue at 1%
+Critical and 4% High.
+
+Injection recall at the top 5% improved on every type: cost 18.0 to 53.3%, fast
+completion 16.7 to 81.3%, splits 10.1 to 21.6%, duplicates 5.3 to 10.7%. Two
+targets remain unmet for reasons recorded in `models/metrics.json` rather than
+tuned away. The duplicate target is structurally unreachable: 9,239 real rows are
+exact duplicates within a constituency and the top 5% holds only 3,865 works, so
+a reworded plant correctly ranks below them.

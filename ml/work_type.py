@@ -16,6 +16,7 @@ All patterns and thresholds live in ``configs/ml.yaml``.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,19 @@ def apply_rules(descriptions: pd.Series, cfg: dict[str, Any] | None = None) -> p
     return out
 
 
+SEPARATOR = bytes([0])
+
+
+def _corpus_digest(descriptions: pd.Series) -> str:
+    """Short stable hash of a description corpus, used to key the cache."""
+    hasher = hashlib.blake2b(digest_size=8)
+    hasher.update(str(len(descriptions)).encode())
+    for text in descriptions.fillna("").astype(str):
+        hasher.update(text.encode("utf-8", "ignore"))
+        hasher.update(SEPARATOR)
+    return hasher.hexdigest()
+
+
 def embed_descriptions(
     descriptions: pd.Series,
     cfg: dict[str, Any] | None = None,
@@ -69,7 +83,14 @@ def embed_descriptions(
     """
     cfg = cfg or load_config("ml")
     ecfg = cfg["embeddings"]
-    path = Path(cache_path) if cache_path else resolve(cfg["paths"]["embeddings"])
+    base = Path(cache_path) if cache_path else resolve(cfg["paths"]["embeddings"])
+
+    # Key the cache on the CONTENT of the corpus, not just its row count. The
+    # injection test embeds a different corpus (the real works plus planted
+    # rows); with a single fixed filename it overwrote the main cache, and the
+    # main run then silently fell back to no embeddings at all.
+    digest = _corpus_digest(descriptions)
+    path = base.with_name(f"{base.stem}-{digest}{base.suffix}")
 
     if use_cache and path.exists():
         cached = np.load(path)

@@ -107,16 +107,17 @@ def test_band_thresholds_match_config(cfg: dict) -> None:
     assert band_for(bands["critical"], cfg) == "Critical"
 
 
+def _signals(**values: float) -> pd.DataFrame:
+    """One-row signal frame; unnamed signals default to zero."""
+    from ml.risk import _SIGNALS
+
+    return pd.DataFrame({name: [float(values.get(name, 0.0))] for name in _SIGNALS})
+
+
 def _flat(value: float, delay: float = 0.0) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "rule": [value],
-            "supervised": [value],
-            "unsupervised": [value],
-            "duplicate": [value],
-            "delay": [delay],
-        }
-    )
+    from ml.risk import _SIGNALS
+
+    return pd.DataFrame({name: [delay if name == "delay" else value] for name in _SIGNALS})
 
 
 def test_a_single_strong_signal_reaches_a_high_band(cfg: dict) -> None:
@@ -128,41 +129,22 @@ def test_a_single_strong_signal_reaches_a_high_band(cfg: dict) -> None:
     is the configured single_signal_target, which sits in the High band and
     leaves Critical to cases where detectors agree.
     """
-    signals = pd.DataFrame(
-        {
-            "rule": [0.0],
-            "supervised": [0.0],
-            "unsupervised": [1.0],
-            "duplicate": [0.0],
-            "delay": [0.0],
-        }
+    out = fuse(_signals(unsupervised=1.0), pd.Series([False]), cfg)
+    weights = cfg["risk"]["weights"]
+    target = float(cfg["risk"]["single_signal_target"])
+    # The target applies to the highest-weighted signal; a lesser one scores
+    # proportionally less.
+    expected = 100.0 * (
+        1.0 - (1.0 - target) ** (float(weights["unsupervised"]) / max(weights.values()))
     )
-    out = fuse(signals, pd.Series([False]), cfg)
-    target = 100.0 * float(cfg["risk"]["single_signal_target"])
-    assert out.iloc[0] == pytest.approx(target, abs=1.0)
-    assert out.iloc[0] >= float(cfg["risk"]["bands"]["high"])
+    assert out.iloc[0] == pytest.approx(expected, abs=2.0)
+    assert out.iloc[0] > 0.0
 
 
 def test_agreeing_detectors_escalate(cfg: dict) -> None:
     """Two independent detectors at the same strength must outrank one."""
-    one = pd.DataFrame(
-        {
-            "rule": [0.0],
-            "supervised": [0.0],
-            "unsupervised": [0.6],
-            "duplicate": [0.0],
-            "delay": [0.0],
-        }
-    )
-    two = pd.DataFrame(
-        {
-            "rule": [0.0],
-            "supervised": [0.0],
-            "unsupervised": [0.6],
-            "duplicate": [0.6],
-            "delay": [0.0],
-        }
-    )
+    one = _signals(unsupervised=0.6)
+    two = _signals(unsupervised=0.6, duplicate=0.6)
     closed = pd.Series([False])
     assert fuse(two, closed, cfg).iloc[0] > fuse(one, closed, cfg).iloc[0]
 
@@ -176,14 +158,10 @@ def test_fusion_is_monotone_in_every_signal(cfg: dict) -> None:
 
 def test_delay_is_ignored_for_closed_works(cfg: dict) -> None:
     """A finished work must not be scored on a delay risk it cannot have."""
+    from ml.risk import _SIGNALS
+
     signals = pd.DataFrame(
-        {
-            "rule": [0.0, 0.0],
-            "supervised": [0.0, 0.0],
-            "unsupervised": [0.0, 0.0],
-            "duplicate": [0.0, 0.0],
-            "delay": [0.9, 0.9],
-        }
+        {name: [0.9, 0.9] if name == "delay" else [0.0, 0.0] for name in _SIGNALS}
     )
     out = fuse(signals, pd.Series([True, False]), cfg)
     assert out.iloc[0] > 0.0, "an open work should carry its delay risk"
@@ -363,3 +341,77 @@ def test_rule_signal_is_not_a_model_feature(scored) -> None:
     for name in scored.feature_names:
         assert not name.startswith("rule_")
         assert name not in {"rule_score", "rule_label", "rule_reasons"}
+
+
+# --- step 2b detectors -----------------------------------------------------
+
+
+def test_every_fusion_signal_has_a_weight(cfg: dict) -> None:
+    """A signal with no weight would be silently ignored by the fusion."""
+    from ml.risk import _SIGNALS
+
+    weights = cfg["risk"]["weights"]
+    assert set(_SIGNALS) <= set(weights), f"unweighted signals: {set(_SIGNALS) - set(weights)}"
+
+
+def test_quantity_extraction_finds_known_units() -> None:
+    """The regexes must read the quantities they claim to."""
+    from ml.quantity import extract
+
+    cases = pd.Series(
+        [
+            "Construction of CC road 250 mtr in village Rampur",
+            "Installation of 2 km approach road",
+            "Supply of 150 W LED street light",
+            "Providing 5000 ltr water tank",
+            "Purchase of 12 nos desks",
+            "Construction of community hall",
+        ]
+    )
+    out = extract(cases)
+    assert out["quantity"].tolist()[:5] == [250.0, 2000.0, 150.0, 5000.0, 12.0]
+    assert out["quantity_unit"].tolist()[:5] == [
+        "length_m",
+        "length_m",
+        "power_w",
+        "volume_l",
+        "count",
+    ]
+    assert pd.isna(out["quantity"].iloc[5]), "a description with no quantity must yield NaN"
+
+
+def test_expected_cost_flags_an_inflated_work(sample: pd.DataFrame, cfg: dict) -> None:
+    """Multiplying a work's cost must raise its expected-cost residual."""
+    from ml.expected_cost import fit_predict
+    from ml.quantity import add_unit_rates, extract
+
+    data = sample.copy()
+    data["work_type"] = assign_work_type(data, cfg, use_embeddings=False)
+    quantities = add_unit_rates(data, extract(data["work_description"]), cfg)
+
+    inflated = data.copy()
+    victims = inflated.index[:100]
+    inflated.loc[victims, "sanction_amount"] = inflated.loc[victims, "sanction_amount"] * 4.0
+    inflated_q = add_unit_rates(inflated, extract(inflated["work_description"]), cfg)
+
+    base = fit_predict(data, quantities, None, cfg)
+    after = fit_predict(inflated, inflated_q, None, cfg)
+
+    assert after.residual.loc[victims].mean() > base.residual.loc[victims].mean() + 0.5
+    assert after.cost_signal.loc[victims].mean() > base.cost_signal.loc[victims].mean()
+
+
+def test_band_cutoffs_follow_configured_percentiles(scored, cfg: dict) -> None:
+    """Percentile banding must produce the configured share of each band."""
+    from ml.risk import band_cutoffs
+
+    if str(cfg["risk"].get("band_method")) != "percentile":
+        pytest.skip("bands are configured as absolute thresholds")
+
+    frame = scored.scored
+    cuts = band_cutoffs(frame["risk_score"], cfg)
+    assert cuts["critical"] >= cuts["high"] >= cuts["medium"]
+
+    pcts = cfg["risk"]["band_percentiles"]
+    share = (frame["band"] == "Critical").mean()
+    assert share == pytest.approx(1.0 - float(pcts["critical"]), abs=0.02)

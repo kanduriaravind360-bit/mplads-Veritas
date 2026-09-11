@@ -105,6 +105,24 @@ def main(argv: list[str] | None = None) -> int:
         ]
         _print_table("Injection test: rank-based recall", pd.DataFrame(rows))
 
+        comp = injection.get("recall_at_top_5pct_before_after", {})
+        if comp:
+            _print_table(
+                "Injection recall at top 5%: before vs after",
+                pd.DataFrame(
+                    [
+                        {
+                            "injection": k,
+                            "before": f"{v['before_step2b']:.1%}" if v["before_step2b"] else "-",
+                            "after": f"{v['after_step2b']:.1%}",
+                            "target": f"{v['target']:.0%}" if v["target"] else "-",
+                            "met": "yes" if v["target_met"] else "no",
+                        }
+                        for k, v in sorted(comp.items())
+                    ]
+                ),
+            )
+
         det = injection.get("detector_recall", {})
         if det:
             _print_table(

@@ -162,11 +162,22 @@ def compute_rules(df: pd.DataFrame, cfg: dict[str, Any] | None = None) -> pd.Dat
     for col in RULE_COLUMNS:
         out[col] = out[col].astype(bool)
 
-    score = pd.Series(0, index=df.index, dtype="int16")
+    score = pd.Series(0.0, index=df.index, dtype="float64")
     for col in RULE_COLUMNS:
-        score += out[col].astype("int16") * int(weights[col])
+        score += out[col].astype("float64") * float(weights[col])
     out["rule_score"] = score
-    out["rule_label"] = (score >= int(rcfg["label_threshold"])).astype("int8")
+    out["rule_label"] = (score >= float(rcfg["label_threshold"])).astype("int8")
+
+    # A single serious rule should carry a work into the review queue on its
+    # own. Injected fast completions tripped their rule 100% of the time yet
+    # ranked low, because one 2-point rule against a threshold of 4 reads as
+    # half-confidence and nothing else fired.
+    critical = [c for c in rcfg.get("critical_rules", []) if c in out.columns]
+    if critical:
+        any_critical = out[critical].any(axis=1)
+        floor = float(rcfg["critical_rule_signal"]) * float(rcfg["label_threshold"])
+        out["rule_score"] = np.where(any_critical, np.maximum(score, floor), score)
+    out["rule_any_critical"] = out[critical].any(axis=1) if critical else False
     out["rule_reasons"] = _reason_text(out)
     return out
 

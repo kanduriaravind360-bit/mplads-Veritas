@@ -173,6 +173,45 @@ features:
     Unknown: 0
 
 # ---------------------------------------------------------------------------
+# Expected-cost model (ml/expected_cost.py)
+#
+# Replaces peer median/MAD as the primary cost signal. Peer groups cannot price
+# a work: a 100m lane and a 2km highway are both "Road / Pavement", so the peer
+# median sits between them. Measured, the median peer group has a MAD of 0.335
+# log-rupees, meaning a 4x overcharge is under 3 robust deviations and escapes.
+#
+# Predictions are out-of-fold so no work prices itself.
+# ---------------------------------------------------------------------------
+expected_cost:
+  n_splits: 5
+  svd_components: 50          # description embedding reduced to this many dims
+  min_residual_mad: 0.15      # log-rupees floor, as for the peer z-score
+  # Residual z at which the cost signal starts and saturates, calibrated on the
+  # measured distribution rather than guessed. Works inflated 3-5x land at a
+  # median residual of 1.371 log-rupees (log(3)=1.10, log(5)=1.61, so the model
+  # is pricing the original correctly) and a median z of 3.84. Ordinary works sit
+  # at z=0.00 median and 1.57 at the 90th percentile.
+  #
+  # At 2.0/6.0 a typical 4x overcharge scored only 0.46 and could not carry a
+  # work into the queue. At 1.5/4.0 it scores 0.94, while 1.5 still fires on only
+  # 10.7% of ordinary works against 96.0% of inflated ones.
+  signal_z_start: 1.5
+  signal_z_full: 4.0
+  # Unit rate is only available for the ~12% of works stating a quantity, so it
+  # supplements rather than replaces the residual. Only the top of the
+  # distribution counts.
+  unit_rate_pct_start: 0.90
+  xgb:
+    n_estimators: 500
+    max_depth: 8
+    learning_rate: 0.06
+    subsample: 0.85
+    colsample_bytree: 0.8
+    min_child_weight: 10
+    reg_lambda: 2.0
+    tree_method: hist
+
+# ---------------------------------------------------------------------------
 # Transparent rule layer, recomputed from observable data (ml/rules.py)
 #
 # The dataset ships flag_* already computed, but those cannot respond to changed
@@ -199,15 +238,28 @@ rules:
   vendor_concentration_works: 191
   payment_stuck_status: Payment In-Progress
   payment_stuck_days: 60          # in progress AND stale for this long
+  # Weights follow the dataset's own definition so the recomputed score stays
+  # comparable to the shipped anomaly_score, EXCEPT round_amount. That rule
+  # fires on 36% of all works, which makes it close to a constant rather than a
+  # signal, so it is down-weighted here. Its effect on injection recall is
+  # measured each run.
   weights:
     rule_sanction_delay: 2
     rule_stuck_work: 3
     rule_cost_outlier: 3
     rule_fast_completion: 2
-    rule_round_amount: 1
+    rule_round_amount: 0.25
     rule_vendor_concentration: 3
     rule_payment_stuck: 1
   label_threshold: 4
+  # Rules serious enough that firing one alone should carry a work into the
+  # review queue, regardless of what the other detectors say.
+  critical_rules:
+    - rule_cost_outlier
+    - rule_fast_completion
+    - rule_stuck_work
+    - rule_vendor_concentration
+  critical_rule_signal: 0.85
 
 # ---------------------------------------------------------------------------
 # Unsupervised anomaly detection
@@ -234,35 +286,53 @@ anomaly:
 # Duplicates and split works
 # ---------------------------------------------------------------------------
 duplicates:
-  cosine_min: 0.90
-  fuzzy_min: 85
+  # Candidate generation: nearest neighbours on the description embedding,
+  # blocked by district (IDA) or constituency AND work type. Blocking on the
+  # executing agency as well as the constituency lets a duplicate be found when
+  # the same district records it under either.
+  neighbours: 25
+  candidate_cosine_floor: 0.70
   days_window: 730
-  amount_ratio_min: 0.7
-  amount_ratio_max: 1.4
-  group_keys: [constituency, ida]
-  # A description appearing in this many distinct constituencies is a standard
-  # catalogue item ("High Mast LED Light"), not evidence of duplication. Such a
-  # pair survives only if it also shares a location word.
+  group_keys: [ida, constituency]
+  max_block_size: 1500
+
+  # Weighted pair score replaces the old AND-chain of hard gates. A candidate
+  # that failed any single gate was discarded, which lost genuine duplicates
+  # that had been reworded or re-costed: recall on planted duplicates was 5.3%.
+  # Scoring lets strength on one axis offset weakness on another.
+  score_weights:
+    cosine: 0.45
+    fuzzy: 0.25
+    location: 0.15
+    amount: 0.15
+  pair_score_threshold: 0.88
+
+  # "High Mast LED Light" is a catalogue item ordered in hundreds of places, so
+  # a description spanning many constituencies is weak evidence of duplication.
+  # The penalty is a score deduction rather than a hard exclusion. Its effect on
+  # planted duplicates is measured each run and reported in metrics.
   standard_item_constituencies: 5
-  # Location overlap is the real discriminator, applied to EVERY pair.
-  #
-  # Measured on this data, only 10 distinct descriptions appear in 5 or more
-  # constituencies (460 rows), so the constituency-spread rule alone barely
-  # fires. What actually inflates the candidate set is bulk rollouts: one
-  # constituency ordering up to 1,254 works of the same type, whose descriptions
-  # are one template differing only by village or ward name. Those score above
-  # 0.90 cosine against each other but are plainly different works.
-  #
-  # So a pair must share most of its non-generic words (village/ward names) to
-  # count. Two records of the SAME work share them all; two lights in different
-  # villages share none. Standard catalogue items must clear a higher bar.
-  # Calibrated on 600 sampled blocks (187,621 candidate pairs). Raising the
-  # location Jaccard from 0.5 to 0.85 cut candidate pairs 41% (23,251 -> 13,759)
-  # while keeping every single exact-duplicate pair, i.e. it removes bulk
-  # rollouts at no cost to recall. 0.80 is used instead of 0.85 to tolerate one
-  # dropped word in a reworded duplicate.
-  min_location_jaccard: 0.80
-  standard_item_jaccard: 0.90
+  # Measured with the rule on and off: planted-duplicate recall was 72.0% either
+  # way, so the constituency-spread penalty earns nothing here and is disabled.
+  # The repetition penalty below does the job it was meant to do. Kept in code
+  # and re-measured each run so the finding stays visible rather than assumed.
+  standard_item_penalty: 0.05
+  apply_standard_penalty: false
+
+  # Bulk rollouts defeat similarity scoring: fifty byte-identical copies of a
+  # catalogue item score a perfect 1.0, above a genuinely reworded duplicate at
+  # 0.94, so ranking by similarity surfaces rollouts first. Repetition count is
+  # the real discriminator. Two copies of a description in one constituency is a
+  # duplicate; many copies is a programme.
+  repeat_free_copies: 2
+  repeat_penalty: 0.06
+
+  # A cluster bigger than this is a bulk rollout, not double entry. Genuine
+  # duplicate entry produces two or three records.
+  max_cluster_size: 6
+  # Confidence floor for a work sitting inside an oversized cluster.
+  oversized_cluster_floor: 0.25
+
   location_stopwords:
     - construction
     - installation
@@ -292,21 +362,30 @@ duplicates:
     - for
     - with
     - from
-  max_block_size: 1500         # guard: skip pathologically large blocks
-  # A duplicate cluster bigger than this is a bulk rollout, not double entry.
-  # Catalogue descriptions such as "High Mast LED Light (9.5 mtr MS Pole)" carry
-  # no location words at all, so identical copies of one across a constituency
-  # pass every similarity gate. Genuine duplicate entry produces two or three
-  # records; 255 does not.
-  max_cluster_size: 6
+    - phase
+
   split_works:
     min_group: 3
-    # A genuine split is a handful of works. Without a ceiling the sliding
-    # window happily returns a 215-work group, which is a bulk programme, not
-    # one work broken up to dodge a threshold.
     max_group: 12
-    days_window: 30
+    # Widened from 30 days: a split spread over two months is still a split.
+    days_window: 60
     combined_percentile: 90
+    # The group total must clear the EASIER of the peer p90 and a multiple of
+    # the peer median. Requiring p90 alone is unsatisfiable in heavy-tailed peer
+    # groups: where p90 is 10x the median, four pieces cannot both sit below the
+    # median and sum past p90. Measured, that cost 8 of 37 planted groups.
+    combined_median_multiple: 2.5
+    # Vendor identity is a BONUS, not a requirement. Vendor is missing for ~20%
+    # of works, and demanding a match discarded most genuine groups: only 12% of
+    # planted split groups were detected.
+    min_location_overlap: 0.15
+    round_threshold_tolerance: 0.10
+    score_weights:
+      size: 0.25
+      total: 0.30
+      tight_dates: 0.15
+      round_amounts: 0.10
+      same_vendor: 0.20
 
 # ---------------------------------------------------------------------------
 # Delay prediction (trained on observed outcomes, not the proxy label)
@@ -412,12 +491,33 @@ risk:
   # below the 95th percentile, which is a deliberate choice: one signal earns a
   # place in the High band, agreement between detectors earns the top of it.
   single_signal_target: 0.75
+  # Revised in step 2b. The expected-cost residual is now its own channel: it is
+  # the flagship detector and independent evidence from the Isolation Forest, so
+  # folding it into the unsupervised channel by taking a maximum wasted it.
+  # Duplicates and split groups are the most actionable and
+  # highest-precision findings the system produces, and a reviewer can verify
+  # one in minutes, yet at 0.15 a confident duplicate could reach only 56 of 100
+  # on its own and never entered the review queue. The supervised model is cut
+  # because it only generalises the rule layer, so weighting both double-counts
+  # the same evidence.
   weights:
-    rule: 0.25
-    supervised: 0.20
-    unsupervised: 0.25
-    duplicate: 0.15
-    delay: 0.15
+    rule: 0.20
+    supervised: 0.10
+    unsupervised: 0.20
+    cost: 0.25
+    duplicate: 0.22
+    delay: 0.12
+  # Bands are PERCENTILE cut-offs, not fixed score values. Fixed thresholds put
+  # 13.6% of all works (10,544) into High or Critical, which is more than anyone
+  # can review, and the count moved every time a signal was rescaled. Percentiles
+  # fix the review volume by design and survive recalibration. The score itself
+  # stays continuous; metrics.json records the score value at each cut-off.
+  band_method: percentile
+  band_percentiles:
+    critical: 0.99      # top 1%
+    high: 0.95          # next 4%
+    medium: 0.80        # next 15%
+  # Used only when band_method is "absolute".
   bands:
     medium: 40
     high: 70
@@ -449,6 +549,10 @@ evaluation:
     # summed to 1.6x the source and usually failed to clear p90: the test was
     # not producing split-shaped groups at all, and the detector correctly
     # ignored them.
-    split_piece_of_p90: 0.40
+    # Each piece as a fraction of the peer MEDIAN. An earlier version sized
+    # pieces against the p90, which left them above the median once the injected
+    # rows themselves pulled the median down: 13 of 37 groups then failed the
+    # "each piece below the median" test they were meant to satisfy.
+    split_piece_of_median: 0.70
   recall_at: [0.01, 0.05]
   sample_rows: 5000               # used by the reproducibility test

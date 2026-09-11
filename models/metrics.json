@@ -86,8 +86,34 @@
       }
     ]
   },
+  "quantity_extraction": {
+    "rows": 77312,
+    "with_quantity": 9951,
+    "coverage_pct": 12.87,
+    "by_unit": {
+      "length_m": 4258,
+      "count": 3653,
+      "volume_l": 1105,
+      "power_w": 681,
+      "power_hp": 156,
+      "bore_mm": 73,
+      "area_sqm": 25
+    }
+  },
+  "expected_cost_model": {
+    "n_rows": 77312,
+    "n_splits": 5,
+    "device": "cuda",
+    "svd_components": 50,
+    "mae_log_rupees": 0.3399,
+    "mae_as_cost_ratio": 1.405,
+    "residual_std": 0.5181,
+    "residual_mad": 0.2079,
+    "r2": 0.7676,
+    "note": "Out-of-fold predictions: every work is priced by a model that never saw it. mae_as_cost_ratio is the typical multiplicative error, so 1.6 means predictions are typically within about 1.6x."
+  },
   "rule_layer": {
-    "positive_rate": 0.04088627897350993,
+    "positive_rate": 0.015030008278145695,
     "agreement_with_shipped_flags": {
       "rule_sanction_delay": {
         "agreement": 0.9995,
@@ -132,22 +158,23 @@
         "both_true": 233
       },
       "label": {
-        "agreement": 0.9701,
+        "agreement": 0.9818,
         "shipped_positive": 933,
-        "recomputed_positive": 3161
+        "recomputed_positive": 1162
       }
     },
     "note": "Rules are recomputed from observable columns so they respond to corrected or uploaded data, which the shipped flag_* columns cannot. They are a fusion signal, never a model input."
   },
   "n_features": 33,
   "duplicates": {
-    "pairs": 4320,
-    "clusters": 1756,
-    "works_flagged": 4590
+    "pairs": 72403,
+    "clusters": 3793,
+    "works_flagged": 18327
   },
   "split_works": {
-    "groups": 593,
-    "works": 4293
+    "groups": 1027,
+    "works": 7069,
+    "with_same_vendor": 487
   },
   "delay_model": {
     "n_labelled": 44371,
@@ -193,44 +220,52 @@
     "precision_at_100": 1.0,
     "precision_at_500": 0.996
   },
+  "band_cutoffs": {
+    "critical": 95.05,
+    "high": 85.16,
+    "medium": 64.06
+  },
+  "band_method": "percentile",
   "risk_bands": {
-    "Low": 44732,
-    "Medium": 22036,
-    "High": 6424,
-    "Critical": 4120
+    "Low": 61847,
+    "Medium": 11599,
+    "High": 3092,
+    "Critical": 774
   },
   "alerts": {
-    "total": 12893,
+    "total": 8686,
     "by_type": {
-      "high_risk_work": 10544,
-      "duplicate_group": 1756,
-      "split_work_group": 593
+      "high_risk_work": 3866,
+      "duplicate_group": 3793,
+      "split_work_group": 1027
     }
   },
   "weights": {
-    "rule": 0.25,
-    "supervised": 0.2,
-    "unsupervised": 0.25,
-    "duplicate": 0.15,
-    "delay": 0.15
+    "rule": 0.2,
+    "supervised": 0.1,
+    "unsupervised": 0.2,
+    "cost": 0.25,
+    "duplicate": 0.22,
+    "delay": 0.12
   },
   "timings_seconds": {
     "load works": 0.13,
-    "embed descriptions (GPU)": 51.07,
-    "work type": 19.01,
-    "rule layer": 1.73,
+    "embed descriptions (GPU)": 0.08,
+    "work type": 19.55,
+    "quantity + expected cost": 37.15,
+    "rule layer": 1.77,
     "features": 0.69,
-    "unsupervised anomaly": 12.16,
-    "duplicates": 48.48,
-    "split works": 7.38,
-    "delay model": 5.15,
-    "supervised proxy model": 7.76,
+    "unsupervised anomaly": 11.29,
+    "duplicates": 75.73,
+    "split works": 12.49,
+    "delay model": 4.84,
+    "supervised proxy model": 7.89,
     "risk fusion": 0.04,
-    "reasons (EN + HI)": 6.87,
-    "assemble + roll up": 3.81,
+    "reasons (EN + HI)": 6.76,
+    "assemble + roll up": 3.71,
     "save outputs": 0.79
   },
-  "total_seconds": 165.23,
+  "total_seconds": 183.14,
   "feature_list": [
     "amount_vs_peer_median",
     "cost_pct_in_type",
@@ -267,11 +302,12 @@
     "vendor_works_in_ida"
   ],
   "detector_weights": {
-    "rule": 0.25,
-    "supervised": 0.2,
-    "unsupervised": 0.25,
-    "duplicate": 0.15,
-    "delay": 0.15
+    "rule": 0.2,
+    "supervised": 0.1,
+    "unsupervised": 0.2,
+    "cost": 0.25,
+    "duplicate": 0.22,
+    "delay": 0.12
   },
   "risk_bands_thresholds": {
     "medium": 40,
@@ -282,43 +318,80 @@
     "per_type": {
       "duplicate": {
         "n_injected": 150.0,
-        "recall_at_top_1pct": 0.0133,
-        "found_at_top_1pct": 2.0,
-        "recall_at_top_5pct": 0.0533,
-        "found_at_top_5pct": 8.0
+        "recall_at_top_1pct": 0.0267,
+        "found_at_top_1pct": 4.0,
+        "recall_at_top_5pct": 0.1067,
+        "found_at_top_5pct": 16.0
       },
       "fast_complete": {
         "n_injected": 150.0,
         "recall_at_top_1pct": 0.0333,
         "found_at_top_1pct": 5.0,
-        "recall_at_top_5pct": 0.1667,
-        "found_at_top_5pct": 25.0
+        "recall_at_top_5pct": 0.8133,
+        "found_at_top_5pct": 122.0
       },
       "inflated_cost": {
         "n_injected": 150.0,
-        "recall_at_top_1pct": 0.0267,
-        "found_at_top_1pct": 4.0,
-        "recall_at_top_5pct": 0.18,
-        "found_at_top_5pct": 27.0
+        "recall_at_top_1pct": 0.1667,
+        "found_at_top_1pct": 25.0,
+        "recall_at_top_5pct": 0.5333,
+        "found_at_top_5pct": 80.0
       },
       "split_group": {
         "n_injected": 148.0,
-        "recall_at_top_1pct": 0.027,
-        "found_at_top_1pct": 4.0,
-        "recall_at_top_5pct": 0.1014,
-        "found_at_top_5pct": 15.0
+        "recall_at_top_1pct": 0.0,
+        "found_at_top_1pct": 0.0,
+        "recall_at_top_5pct": 0.2162,
+        "found_at_top_5pct": 32.0
       }
     },
     "detector_recall": {
-      "inflated_cost": 0.4733,
+      "inflated_cost": 0.9667,
       "fast_complete": 1.0,
-      "duplicate": 0.4733,
-      "split_group": 0.1216
+      "duplicate": 0.7333,
+      "split_group": 0.4595
+    },
+    "detector_recall_note": "Did the detector meant to catch each injection fire at all. This is separate from whether the work then reached the top of the national ranking, which also depends on how many genuine cases compete for the same places.",
+    "recall_at_top_5pct_before_after": {
+      "duplicate": {
+        "before_step2b": 0.053,
+        "after_step2b": 0.1067,
+        "change": 0.0537,
+        "target": 0.7,
+        "target_met": false
+      },
+      "fast_complete": {
+        "before_step2b": 0.167,
+        "after_step2b": 0.8133,
+        "change": 0.6463,
+        "target": 0.9,
+        "target_met": false
+      },
+      "inflated_cost": {
+        "before_step2b": 0.18,
+        "after_step2b": 0.5333,
+        "change": 0.3533,
+        "target": 0.6,
+        "target_met": false
+      },
+      "split_group": {
+        "before_step2b": 0.101,
+        "after_step2b": 0.2162,
+        "change": 0.1152,
+        "target": 0.5,
+        "target_met": false
+      }
+    },
+    "missed_target_reasons": {
+      "duplicate": "Structurally capped, not a detector failure: the detector finds 73% of planted duplicates. The data already contains 9,239 rows that are EXACT duplicates of another work in the same constituency, and the top 5% of the ranking holds only 3,865 works. A planted duplicate is reworded and therefore less similar than an exact copy, so any correctly ordered queue puts those 9,239 real cases first. Reaching the 70% target would mean ranking reworded copies above exact ones, which is backwards. The right measure for duplicates is the duplicate_group alert stream, where a reviewer actually works, not rank within the global risk score.",
+      "fast_complete": "81.3% against a 90% target. The detector fires on 100% of planted cases, but the pattern is not rare: 2,686 works in the real data were also completed within 6 days with funds fully disbursed, and they compete for the same places. The injected cases are indistinguishable from those, so this measures whether the whole pattern ranks highly, not whether the plants were found.",
+      "inflated_cost": "53.3% against a 60% target, up from 18.0%. The expected-cost model now fires on 96.7% of planted cases, so this is a ranking limit rather than a detection one: roughly 9,000 works carry some cost signal and only 3,865 places exist in the top 5%.",
+      "split_group": "21.6% against a 50% target, up from 10.1%. Detection improved from 12% to 46% once vendor identity became optional and the window stopped requiring a contiguous run of below-median works. The remaining gap is that 7,069 works sit in some split group, far more than the top 5% can hold, and planted groups of four works score mid-range against larger genuine ones."
     },
     "overall": {
       "n_injected": 598.0,
-      "recall_at_top_1pct": 0.0251,
-      "recall_at_top_5pct": 0.1254
+      "recall_at_top_1pct": 0.0569,
+      "recall_at_top_5pct": 0.4181
     },
     "n_rows_with_injections": 77910,
     "n_injected": 598,

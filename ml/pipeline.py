@@ -215,6 +215,22 @@ def run(
             "counts": counts.head(15).to_dict("records"),
         }
 
+    with timer.stage("quantity + expected cost"):
+        from ml.expected_cost import fit_predict
+        from ml.quantity import add_unit_rates, coverage, extract
+
+        quantities = add_unit_rates(works, extract(works["work_description"]), cfg)
+        metrics["quantity_extraction"] = coverage(quantities)
+
+        cost = fit_predict(works, quantities, embeddings, cfg)
+        works["quantity"] = quantities["quantity"].to_numpy()
+        works["unit_rate"] = quantities["unit_rate"].to_numpy()
+        works["expected_log_amount"] = cost.predicted_log_amount.to_numpy()
+        works["cost_residual"] = cost.residual.to_numpy()
+        works["cost_residual_z"] = cost.residual_z.to_numpy()
+        works["cost_signal"] = cost.cost_signal.to_numpy()
+        metrics["expected_cost_model"] = cost.metrics
+
     with timer.stage("rule layer"):
         from ml.rules import agreement_with_shipped, compute_rules
 
@@ -262,7 +278,8 @@ def run(
         in_split = split_membership(works, splits)
         metrics["split_works"] = {
             "groups": int(len(splits)),
-            "works": int(in_split.sum()),
+            "works": int((in_split > 0).sum()),
+            "with_same_vendor": int(splits["same_vendor"].sum()) if not splits.empty else 0,
         }
 
     delay_risk = pd.Series(0.0, index=works.index, name="delay_risk")
@@ -335,6 +352,11 @@ def run(
         rollups = build_rollups(scored, cfg)
         alerts = build_alerts(scored, dup.clusters, splits, cfg)
 
+        from ml.risk import band_cutoffs
+
+        cuts = band_cutoffs(scored["risk_score"], cfg)
+        metrics["band_cutoffs"] = {k: round(float(v), 2) for k, v in cuts.items()}
+        metrics["band_method"] = str(cfg["risk"].get("band_method", "absolute"))
         band_counts = scored["band"].value_counts()
         metrics["risk_bands"] = {
             b: int(band_counts.get(b, 0)) for b in ("Low", "Medium", "High", "Critical")
