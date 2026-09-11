@@ -21,7 +21,7 @@ frontend from step 4 onward).
 ```bash
 uv venv --python 3.12 .venv
 uv pip install -e ".[dev]"
-uv pip install torch --index-url https://download.pytorch.org/whl/cu128
+uv pip install torch==2.9.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 ```
 
 The `cu128` index is required — RTX 50-series (Blackwell, `sm_120`) GPUs will not
@@ -60,10 +60,11 @@ ruff check . && pytest
 
 ## Progress
 
-**Step 1 — setup + data loading.** Python 3.12 environment on `uv` with the full
-data/ML/API stack pinned and import-verified (24/24 modules). PyTorch is
-installed from the CUDA 12.8 index for the RTX 5060. Private GitHub repo created
-and pushed.
+**Step 1 — setup + data loading.** Python 3.12.10 environment on `uv` with the
+full data/ML/API stack pinned and import-verified (29/29 modules). PyTorch
+2.9.0+cu128 runs on the RTX 5060 Laptop GPU (`sm_120`, 8.55 GB, 3.6 TFLOP/s fp32
+on a 4096² matmul); XGBoost trains with `device="cuda"`. Private GitHub repo
+created and pushed.
 
 `ml/data.py` loads the `Data` sheet, parses the four date columns, coerces
 numeric types, standardises `work_status` / `work_category`, and flags date-logic

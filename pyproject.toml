@@ -24,6 +24,8 @@ dependencies = [
     "shap==0.46.0",
     "pyod==2.0.5",
     "sentence-transformers==3.4.1",
+    # transitive, pinned: the current regex release is blocked by Smart App Control
+    "regex==2024.11.6",
     # text / graph / utils
     "rapidfuzz==3.11.0",
     "networkx==3.4.2",

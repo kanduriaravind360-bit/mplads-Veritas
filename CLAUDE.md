@@ -96,9 +96,21 @@ An Application Control policy has blocked this file.
 ```
 
 The pins in `pyproject.toml` are mature, widely-downloaded builds that load
-cleanly. **Do not bump numpy / scipy / scikit-learn / pandas without
-re-testing imports on this machine.** If a new pin is blocked, step back to an
-older release rather than disabling Smart App Control.
+cleanly. So far this has hit numpy, scipy, scikit-learn and `regex` (a
+transitive dependency of sentence-transformers). **Do not bump a pinned package
+without re-testing imports on this machine.** If a new pin is blocked, step back
+to an older release rather than disabling Smart App Control.
+
+Verify the whole stack after any dependency change:
+
+```bash
+.venv/Scripts/python.exe -c "import numpy.random, pandas, sklearn, scipy.sparse, xgboost, lightgbm, shap, pyod, numba, torch, sentence_transformers; print('imports OK')"
+```
+
+The other environment hazard is **flaky DNS on this network**. Installs and
+pushes fail mid-transfer with `No such host is known`. Retry loops fix it; for
+very large wheels, download with `curl -C -` (resume) and install from the local
+file.
 
 ---
 
