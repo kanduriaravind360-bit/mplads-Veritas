@@ -72,3 +72,23 @@ errors without dropping rows, writing `data/processed/works.parquet`. Four
 invariants are covered by `tests/test_data.py`: 77,312 rows, unique `work_id`,
 `anomaly_score` reproducing exactly from the seven weighted flags, and
 `anomaly_label == (anomaly_score >= 4)`.
+
+**Step 2 — ML pipeline + risk scoring.** `python -m ml.train` runs the whole
+thing end to end. It derives a real work type from the description (26 Hinglish
+keyword rules covering 80.7% of works, plus GPU sentence-embedding clustering for
+the rest), builds 33 leak-safe features on robust peer-group statistics, and runs
+four detectors: Isolation Forest + ECOD, duplicate and split-work detection,
+a delay model, and a proxy-label model.
+
+Every work gets a 0-100 `risk_score` with bilingual plain-language reasons, plus
+state, district, constituency and vendor roll-ups. Leakage is enforced in code by
+`ml.features.assert_leak_safe` and tested. The proxy-label model's PR-AUC measures
+how learnable the hand-written rules are, **not** fraud detection; the caveat
+ships inside `models/metrics.json`. Full run: 165 seconds on an RTX 5060.
+
+Honest limitation: the synthetic injection test recalls only 5-18% of planted
+anomalies within the top 5% of the ranking. The detectors fire reliably on fast
+completions (100%) but on roughly half of cost inflations and duplicates, and on
+few split groups. Peer price variation in this data is genuinely wide, so a
+fourfold overcharge is under three robust deviations from its peer median.
+Improving detector sensitivity is the main open task. See `models/metrics.json`.

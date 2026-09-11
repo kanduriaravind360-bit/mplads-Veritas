@@ -9,6 +9,8 @@ build/
 # Data artefacts (data/raw IS committed — private repo)
 data/processed/
 *.parquet
+*.npy
+*.npz
 
 # Trained models
 models/*.pkl

@@ -1,0 +1,454 @@
+# ML pipeline configuration for MPLADS Sentinel (step 2).
+#
+# Per CLAUDE.md rule 5, every threshold, weight and rule lives here. Nothing in
+# ml/ hard-codes a cutoff. Read this through ml.config.load_config("ml").
+#
+# LEAKAGE RULE (CLAUDE.md rule 3): flag_*, anomaly_score and flag_reasons are
+# never model inputs. The rule layer reads them only as a transparent,
+# human-written signal to blend at the very end.
+
+seed: 42
+
+# Cut-off ("today") for every age calculation. null = the max date in the data.
+cutoff_date: null
+
+paths:
+  works: data/processed/works.parquet
+  embeddings: data/processed/embeddings.npy
+  scored_works: data/processed/scored_works.parquet
+  duplicates: data/processed/duplicates.parquet
+  split_groups: data/processed/split_groups.parquet
+  alerts: data/processed/alerts.parquet
+  rollup_state: data/processed/rollup_state.parquet
+  rollup_ida: data/processed/rollup_ida.parquet
+  rollup_mp: data/processed/rollup_mp.parquet
+  rollup_vendor: data/processed/rollup_vendor.parquet
+  models_dir: models
+  metrics: models/metrics.json
+  feature_list: models/feature_list.json
+
+# ---------------------------------------------------------------------------
+# Sentence embeddings (GPU)
+# ---------------------------------------------------------------------------
+embeddings:
+  model_name: paraphrase-multilingual-MiniLM-L12-v2
+  batch_size: 256
+  max_seq_length: 96
+  normalize: true
+
+# ---------------------------------------------------------------------------
+# Work-type detection
+#
+# work_category is 97.7% "Normal/Others", so it is useless as a peer group.
+# These rules derive a real work type from the description. Descriptions are
+# Latin-script only (verified: zero Devanagari rows), mixing English with
+# transliterated Hindi, so the patterns carry common Hinglish spellings.
+#
+# Order matters: the FIRST pattern that matches wins. More specific types are
+# listed before the broader ones they would otherwise be swallowed by, e.g.
+# "Solar Light" precedes "High Mast / LED Light" so that "solar hymas light"
+# lands on solar, and "Bus Shelter" precedes "Ambulance / Vehicle" so that
+# "bus stand" is not read as a vehicle purchase.
+# ---------------------------------------------------------------------------
+work_type:
+  rules:
+    - name: Solar Light
+      pattern: 'solar|saur\s*urja|surya\s*light'
+
+    - name: High Mast / LED Light
+      pattern: 'high\s*ma[sx]t|highma[sx]t|hy\s*ma[sx]|hyma[sx]|hi\s*ma[sx]t|semi\s*high|mini\s*ma[sx]t|mast\s*light|led\s*light|street\s*li|streetli|sodium\s*vapour|prakash\s*vyavastha'
+
+    - name: Bus Shelter / Passenger Shed
+      pattern: 'bus\s*(?:shelter|stand|stop|stoppage|bay)|passenger\s*shed|yatri\s*(?:shed|pratiksha)|waiting\s*(?:shed|hall|room)'
+
+    - name: Anganwadi
+      pattern: 'angan\s*wadi|anganwadi|aanganwadi|aganwadi|icds'
+
+    - name: Crematorium / Burial Ground
+      pattern: 'cremat|crimat|muktidham|mukti\s*dham|shamshan|shmshan|smashan|burial|kabrist|graveyard|antyeshti|burning\s*(?:ghat|cot)|bathing\s*ghat|samshan'
+
+    - name: Toilet / Sanitation
+      pattern: 'toilet|shauchalay|sauchalay|sulabh|urinal|latrine|bathroom|snanghar'
+
+    - name: Computer / Smart Class
+      pattern: 'computer|smart\s*(?:class|board|tv)|laptop|projector|e-?learning|digital\s*class|tablet|printer|cctv|c\.c\.t\.v'
+
+    - name: Library / Books
+      pattern: 'library|laibrary|libarary|pustakalay|pustkalay|\bbooks?\b|reading\s*room'
+
+    - name: Sports / Gym / Playground
+      pattern: '\bgym\b|gymna|open\s*gym|sports|khel|playground|play\s*ground|stadium|\bgame|kreeda|crida|volley|badminton|kabaddi'
+
+    - name: Park / Beautification
+      pattern: '\bpark\b|garden|beautif|udyan|udhyan|landscap|\bbagicha|fountain'
+
+    - name: Ambulance / Vehicle
+      pattern: 'ambulance|\bvehicle|\bvan\b|jeep|tractor|hearse|shav\s*vahan|mortuary\s*van'
+
+    - name: Health Centre / Medical Equipment
+      pattern: 'hospital|health\s*(?:cent|sub)|\bphc\b|\bchc\b|dispensar|medical\s*equip|x-?ray|\becg\b|ventilator|oxygen|dialysis|aayush|ayush|patient'
+
+    - name: Water Tank / Tanker / RO Plant
+      pattern: 'water\s*(?:tank|tanker|cooler|purif|filter|atm)|\btanker|\bro\s*plant|r\.o\.|overhead\s*tank|sintex|syntex|\bsump\b|piau|pyau'
+
+    - name: Hand Pump / Borewell
+      pattern: 'hand\s*pump|handpump|hend\s*pump|bore\s*well|borewell|\bbore\b|submersible|samarsible'
+
+    - name: Tube Well / Water Pipeline
+      pattern: 'tube\s*well|tubewell|pipe\s*line|pipeline|water\s*supply|nal\s*jal|jal\s*jeevan|peyjal|pey\s*jal|\bpipe\b'
+
+    - name: Drain / Nala
+      pattern: '\bdrain|\bnali\b|\bnaali|\bnala\b|\bnalla|gutter|sewer|storm\s*water|\bkhal\b'
+
+    - name: Culvert / Bridge
+      pattern: 'culvert|bridge|\bpul\b|puliya|pulia|foot\s*over|causeway'
+
+    - name: Boundary / Compound Wall
+      pattern: 'boundary\s*wall|compound\s*wall|chardiwari|chahardiwari|chardeewari|retaining\s*wall|parapet|fencing|\bfence\b'
+
+    - name: Community Hall / Bhavan
+      pattern: 'community\s*(?:hall|cent|hal)|samudayik|samudaik|samudayeek|\bbhawan\b|\bbhavan\b|panchayat\s*ghar|barat\s*ghar|marriage\s*hall|milan\s*kendra|sabha\s*grah'
+
+    - name: Classroom / School Building
+      pattern: 'class\s*room|classroom|school\s*(?:building|bhawan|bhavan|room)|additional\s*room|\bshala\b|vidyalay|school\s*repair|mid\s*day\s*meal|\bmdm\b|kitchen\s*shed'
+
+    - name: Furniture
+      pattern: 'furnitur|\bdesk|\bbench|\bchair|\btable\b|almirah|almira|cupboard|\bstool\b|\bcot\b'
+
+    - name: Electric / Transformer
+      pattern: 'transformer|\bkva\b|\bht\s*line|\blt\s*line|electrific|electric|wiring|\bpanel\b|power\s*supply|\bfeeder|voltage|\bdtr\b'
+
+    - name: Paver Block / Interlocking
+      pattern: 'paver|interlocking|inter\s*locking|\bpaving|block\s*work'
+
+    - name: CC / Concrete Road
+      pattern: 'c\.?\s*c\.?\s*(?:road|sadak|rasta|marg)|ccroad|\bpcc\b|\brcc\b|cement\s*concrete|concrete\s*road'
+
+    - name: Road / Pavement
+      pattern: '\broad|\bsadak|\brasta|\bmarg\b|asphalt|bitumin|black\s*top|metall?ing|\bstreet|\bpath|\blane\b|approach'
+
+    - name: Community Shed / Platform
+      pattern: '\bshed\b|\bchabutra|chaupal|chopal|platform|\bmandap|\bchowk\b'
+
+  # Descriptions matching no rule are embedded and clustered; each cluster is
+  # named from its highest-weight TF-IDF terms.
+  fallback:
+    n_clusters: 30
+    name_terms: 3
+    label_prefix: "Other: "
+    min_df: 3
+    max_features: 20000
+  unmatched_label: Others
+
+# ---------------------------------------------------------------------------
+# Feature engineering (leak-safe only)
+# ---------------------------------------------------------------------------
+features:
+  # Peer group = work_type x state; fall back to work_type nationally when the
+  # group is thinner than this, so a robust z-score is never built on noise.
+  peer_min_group: 30
+  # Consistency constant making MAD comparable to a standard deviation for
+  # normally distributed data.
+  mad_scale: 1.4826
+  # Guard against a zero MAD (many identical values) blowing the z-score up.
+  # Many peer groups share one sanction amount or one turnaround time, giving
+  # MAD = 0; without a floor the z-score goes to infinity for every row that
+  # differs at all. The floors are in each variable's own units.
+  min_mad: 0.10                  # log-rupees (~10% price spread floor; calibrated:
+                                 # 7.4% of peer groups have MAD exactly 0)
+  min_mad_days: 3.0              # days
+  # Beyond this many robust deviations everything is equally "extreme"; the tail
+  # only adds noise to the scalers and the trees.
+  z_clip: 25.0
+  round_amount_unit: 100000      # is_round_lakh: exact multiple of 1 lakh
+  fiscal_year_start_month: 4     # Indian FY runs April to March
+  march_month: 3                 # year-end sanction rush
+  stage_order:
+    Sanction: 0
+    Vendor Identification: 1
+    Time Estimation: 2
+    Work Partially Completed: 3
+    Work Completed: 4
+    Physical Inspection: 4
+    Unknown: 0
+
+# ---------------------------------------------------------------------------
+# Transparent rule layer, recomputed from observable data (ml/rules.py)
+#
+# The dataset ships flag_* already computed, but those cannot respond to changed
+# data and are absent from uploaded extracts. These thresholds were
+# reverse-engineered from the shipped flags, which separate cleanly with no
+# overlap, e.g. flag_sanction_delay is True from exactly 334 days and False up
+# to 650 with a median of 79.
+#
+# The rule score is a FUSION signal, never a model input (CLAUDE.md rule 3).
+# ---------------------------------------------------------------------------
+rules:
+  sanction_delay_days: 334
+  stuck_work_days: 612
+  stuck_work_stages: [Sanctioned, Vendor Identification, Time Estimation]
+  cost_outlier_zscore: 2.50        # the dataset's own mean/std z-score
+  # Measured: the median peer group has a MAD of 0.335 log-rupees, i.e. works of
+  # the same type genuinely vary several-fold in scope (a 100m road and a 2km
+  # road are both "Road / Pavement"). At a threshold of 3.5 a work priced at 4x
+  # its peer median scores only ~2.8 and escapes, so only 37% of 4x-overpriced
+  # works were caught. 3.0 catches them without flooding the queue.
+  cost_outlier_robust_z: 3.00      # our robust peer median/MAD z-score
+  fast_completion_days: 6
+  round_amount_unit: 100000        # exact multiple of 1 lakh (agreement 1.0000)
+  vendor_concentration_works: 191
+  payment_stuck_status: Payment In-Progress
+  payment_stuck_days: 60          # in progress AND stale for this long
+  weights:
+    rule_sanction_delay: 2
+    rule_stuck_work: 3
+    rule_cost_outlier: 3
+    rule_fast_completion: 2
+    rule_round_amount: 1
+    rule_vendor_concentration: 3
+    rule_payment_stuck: 1
+  label_threshold: 4
+
+# ---------------------------------------------------------------------------
+# Unsupervised anomaly detection
+# ---------------------------------------------------------------------------
+anomaly:
+  isolation_forest:
+    n_estimators: 300
+    max_samples: 0.5
+    contamination: 0.05
+  ecod:
+    contamination: 0.05
+  # The combined score is a percentile rank, so an utterly ordinary work scores
+  # 0.5 and contributes a flat 12.5 points of baseline to every risk score. That
+  # compresses the usable range and buries genuine single-dimension outliers.
+  # Mapping the rank through this tail transform makes the signal behave like
+  # the others: zero for normal works, ramping to 1 across the outlier tail.
+  tail_start_percentile: 0.90
+  top_reasons: 3
+  # A feature must deviate at least this much (in robust z units) to be worth
+  # showing a reviewer as a reason.
+  min_reason_z: 1.5
+
+# ---------------------------------------------------------------------------
+# Duplicates and split works
+# ---------------------------------------------------------------------------
+duplicates:
+  cosine_min: 0.90
+  fuzzy_min: 85
+  days_window: 730
+  amount_ratio_min: 0.7
+  amount_ratio_max: 1.4
+  group_keys: [constituency, ida]
+  # A description appearing in this many distinct constituencies is a standard
+  # catalogue item ("High Mast LED Light"), not evidence of duplication. Such a
+  # pair survives only if it also shares a location word.
+  standard_item_constituencies: 5
+  # Location overlap is the real discriminator, applied to EVERY pair.
+  #
+  # Measured on this data, only 10 distinct descriptions appear in 5 or more
+  # constituencies (460 rows), so the constituency-spread rule alone barely
+  # fires. What actually inflates the candidate set is bulk rollouts: one
+  # constituency ordering up to 1,254 works of the same type, whose descriptions
+  # are one template differing only by village or ward name. Those score above
+  # 0.90 cosine against each other but are plainly different works.
+  #
+  # So a pair must share most of its non-generic words (village/ward names) to
+  # count. Two records of the SAME work share them all; two lights in different
+  # villages share none. Standard catalogue items must clear a higher bar.
+  # Calibrated on 600 sampled blocks (187,621 candidate pairs). Raising the
+  # location Jaccard from 0.5 to 0.85 cut candidate pairs 41% (23,251 -> 13,759)
+  # while keeping every single exact-duplicate pair, i.e. it removes bulk
+  # rollouts at no cost to recall. 0.80 is used instead of 0.85 to tolerate one
+  # dropped word in a reworded duplicate.
+  min_location_jaccard: 0.80
+  standard_item_jaccard: 0.90
+  location_stopwords:
+    - construction
+    - installation
+    - providing
+    - provision
+    - repair
+    - work
+    - works
+    - village
+    - gram
+    - ward
+    - block
+    - district
+    - taluka
+    - panchayat
+    - light
+    - road
+    - near
+    - under
+    - side
+    - high
+    - mast
+    - solar
+    - street
+    - the
+    - and
+    - for
+    - with
+    - from
+  max_block_size: 1500         # guard: skip pathologically large blocks
+  # A duplicate cluster bigger than this is a bulk rollout, not double entry.
+  # Catalogue descriptions such as "High Mast LED Light (9.5 mtr MS Pole)" carry
+  # no location words at all, so identical copies of one across a constituency
+  # pass every similarity gate. Genuine duplicate entry produces two or three
+  # records; 255 does not.
+  max_cluster_size: 6
+  split_works:
+    min_group: 3
+    # A genuine split is a handful of works. Without a ceiling the sliding
+    # window happily returns a 215-work group, which is a bulk programme, not
+    # one work broken up to dodge a threshold.
+    max_group: 12
+    days_window: 30
+    combined_percentile: 90
+
+# ---------------------------------------------------------------------------
+# Delay prediction (trained on observed outcomes, not the proxy label)
+# ---------------------------------------------------------------------------
+delay:
+  horizon_days: 365
+  test_fraction: 0.2           # newest sanctions become the test set
+  xgb:
+    n_estimators: 400
+    max_depth: 6
+    learning_rate: 0.06
+    subsample: 0.85
+    colsample_bytree: 0.85
+    min_child_weight: 5
+    reg_lambda: 1.5
+    tree_method: hist
+  shap_top: 3
+  shap_sample: 20000           # cap SHAP rows for runtime
+  # The delay model predicts a probability, not an anomaly. Roughly 42% of all
+  # mature works run past the horizon, so a work predicted at 42% is completely
+  # average and should contribute nothing to a risk score. Only the excess over
+  # the observed base rate counts. Without this, half the population carries a
+  # delay floor and the High/Critical queue inflates to a fifth of all works.
+  base_rate_from_data: true
+  base_rate_fallback: 0.42
+
+# ---------------------------------------------------------------------------
+# Supervised model on the PROXY label
+#
+# CAVEAT recorded in metrics.json: this learns to reproduce and generalise a
+# hand-written rule set, not confirmed fraud.
+# ---------------------------------------------------------------------------
+supervised:
+  n_splits: 5
+  group_column: constituency   # GroupKFold: an area never spans train and test
+  precision_at: [100, 500]
+  xgb:
+    n_estimators: 400
+    max_depth: 5
+    learning_rate: 0.06
+    subsample: 0.85
+    colsample_bytree: 0.85
+    min_child_weight: 5
+    reg_lambda: 1.5
+    tree_method: hist
+  shap_top: 3
+  shap_sample: 20000
+
+# ---------------------------------------------------------------------------
+# Risk fusion
+#
+# Weight rationale:
+#   rule 0.25          transparent, already trusted by reviewers, but coarse
+#                      (round_amount alone fires on 36% of rows)
+#   supervised 0.20    lowest weight: it only generalises the rule layer, so
+#                      leaning on it would double-count the rules
+#   unsupervised 0.25  the only signal that owes nothing to the proxy label
+#   duplicate 0.15     rare but high-precision and directly actionable
+#   delay 0.15         an efficiency signal, not an integrity one; applies to
+#                      open works only and is renormalised away for closed ones
+# ---------------------------------------------------------------------------
+risk:
+  # How the five signals combine.
+  #
+  #   noisy_or  risk = 1 - PROD(1 - (w_i / max_w) * s_i)
+  #   linear    risk = SUM(w_i * s_i) / SUM(w_i)
+  #
+  # Linear was the first implementation and it does not work here. Every signal
+  # is sparse (near 0 for a normal work), so a work caught by exactly ONE
+  # detector cannot score above that detector's weight, i.e. 25 out of 100. With
+  # bands at 40/70/85 that means nothing reaches High unless two or three
+  # detectors fire at once, yet a real anomaly usually trips only one. Measured:
+  # injected cost-inflation anomalies landed at the 62nd percentile, and the
+  # whole population compressed into a band around 23.
+  #
+  # Noisy-OR treats the weights as reliabilities and the signals as independent
+  # pieces of evidence. One detector at full confidence can carry a work on its
+  # own, and independent detectors agreeing escalates it further, which is how a
+  # triage queue should behave. Weights keep exactly the same meaning and values.
+  #   soft_or   risk = 1 - exp(-k * SUM(w_i * s_i)), k set by single_signal_target
+  #   noisy_or  risk = 1 - PROD(1 - (w_i / max_w) * s_i)
+  #   linear    risk = SUM(w_i * s_i) / SUM(w_i)
+  #
+  # soft_or is used. The other two were tried and measured:
+  #
+  # linear caps a work caught by ONE detector at that detector's weight, i.e. 25
+  # of 100, so nothing reaches High unless several detectors fire together. Real
+  # anomalies usually trip one. Injected cost-inflation cases landed at the 62nd
+  # percentile and the whole population compressed around 23.
+  #
+  # noisy_or fixes that but saturates: any single signal at full strength pins
+  # the score to exactly 100, so 7,191 works tied at 100 and the top 1% became an
+  # arbitrary slice of the ties. Recall at the top 1% measured 0.0% for every
+  # injection type purely from tie-breaking.
+  #
+  # soft_or is smooth and strictly monotone, never reaches 100, and so always
+  # ranks. single_signal_target sets what one detector at full confidence scores
+  # on its own; agreement between detectors pushes above that.
+  method: soft_or
+  # What one detector at full confidence scores on its own. Measured trade-off:
+  # 0.90 pushes 34% of all works into High/Critical, which is not a queue anyone
+  # can review; 0.75 gives 13.4%. Single-detector cases therefore top out just
+  # below the 95th percentile, which is a deliberate choice: one signal earns a
+  # place in the High band, agreement between detectors earns the top of it.
+  single_signal_target: 0.75
+  weights:
+    rule: 0.25
+    supervised: 0.20
+    unsupervised: 0.25
+    duplicate: 0.15
+    delay: 0.15
+  bands:
+    medium: 40
+    high: 70
+    critical: 85
+  max_reasons: 5
+  min_reasons: 3
+  alert_bands: [High, Critical]
+  # CLAUDE.md rule 4: always show the denominator. A constituency with 4 works
+  # and 2 flagged is not the highest-risk area in India. Groups below this many
+  # works are marked low_volume and sorted after the rest, so a tiny denominator
+  # can never top a ranking.
+  rollup_min_works: 20
+
+# ---------------------------------------------------------------------------
+# Evaluation: synthetic injection test
+# ---------------------------------------------------------------------------
+evaluation:
+  injection:
+    per_type: 150
+    cost_multiplier_min: 3.0
+    cost_multiplier_max: 5.0
+    duplicate_reword_drop: 0.15   # fraction of tokens dropped when rewording
+    fast_completion_days: 5
+    split_group_size: 4
+    # Each piece as a fraction of the peer 90th percentile. The pieces must be
+    # individually below the peer median yet jointly above the peer p90, which
+    # is what splitting a work to stay under a threshold actually looks like.
+    # An earlier version used a fraction of the SOURCE amount, so four pieces
+    # summed to 1.6x the source and usually failed to clear p90: the test was
+    # not producing split-shaped groups at all, and the detector correctly
+    # ignored them.
+    split_piece_of_p90: 0.40
+  recall_at: [0.01, 0.05]
+  sample_rows: 5000               # used by the reproducibility test

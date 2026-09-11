@@ -1,0 +1,218 @@
+# Human-readable reason templates, English and Hindi.
+#
+# Every risk score must come with evidence a reviewer can act on. These are
+# simple format templates, deliberately kept out of the code so that a
+# non-programmer can correct the wording or the Hindi.
+#
+# Honesty rules (CLAUDE.md rule 4) apply to every string here: these describe
+# what was observed and what should be CHECKED. None of them assert wrongdoing.
+# MP-facing wording says "works recommended in this constituency", never
+# anything about the MP.
+#
+# Placeholders available per source are listed above each block.
+
+# --- Rule layer: the dataset's own seven flags -----------------------------
+# The rules are transparent and already familiar to reviewers, so the wording
+# stays close to the original but adds the "review" framing.
+rules:
+  "Suspiciously round sanctioned amount":
+    en: "Sanctioned amount is an exact round figure ({amount}), which can indicate an estimate rather than a costing"
+    hi: "स्वीकृत राशि एक पूर्ण गोल संख्या है ({amount}), जो वास्तविक लागत के बजाय अनुमान का संकेत दे सकती है"
+  "Vendor handles unusually high number of works in this constituency":
+    en: "Vendor holds {vendor_works_in_ida:.0f} works in this district ({vendor_share:.0%} of its total)"
+    hi: "इस जिले में विक्रेता के पास {vendor_works_in_ida:.0f} कार्य हैं (जिले के कुल कार्यों का {vendor_share:.0%})"
+  "Sanctioning delay is a statistical outlier for this work category":
+    en: "Took {days_to_sanction:.0f} days from recommendation to sanction, well outside the norm for {work_type}"
+    hi: "संस्तुति से स्वीकृति तक {days_to_sanction:.0f} दिन लगे, जो {work_type} के लिए सामान्य से कहीं अधिक है"
+  "Completed unusually fast for this work category":
+    en: "Marked complete in {duration_days:.0f} days, unusually fast for {work_type}"
+    hi: "{duration_days:.0f} दिनों में पूर्ण दर्ज किया गया, जो {work_type} के लिए असामान्य रूप से तेज़ है"
+  "Sanctioned cost is a statistical outlier for this work category":
+    en: "Sanctioned cost is a statistical outlier for {work_type}"
+    hi: "{work_type} के लिए स्वीकृत लागत एक सांख्यिकीय विसंगति है"
+  "Still in an early stage (not yet started) far longer than typical":
+    en: "Still at the '{work_status}' stage {days_since_sanction:.0f} days after sanction"
+    hi: "स्वीकृति के {days_since_sanction:.0f} दिन बाद भी '{work_status}' चरण पर है"
+  "Payment in-progress for over 60 days":
+    en: "Payment has been in progress for an extended period"
+    hi: "भुगतान लंबे समय से प्रक्रियाधीन है"
+
+# --- Unsupervised layer: peer-group deviations -----------------------------
+# Placeholders: {peer}, {value}, {median}, {ratio}, {z}, {work_type}, {state}
+deviations:
+  cost:
+    high:
+      en: "Cost is {ratio:.1f}x the median for {peer}"
+      hi: "लागत {peer} के मध्यमान से {ratio:.1f} गुना है"
+    low:
+      en: "Cost is only {ratio:.2f}x the median for {peer}"
+      hi: "लागत {peer} के मध्यमान की केवल {ratio:.2f} गुना है"
+  sanction_speed:
+    high:
+      en: "Sanction took far longer than peers ({value:.0f} days vs {median:.0f} typical)"
+      hi: "स्वीकृति में समकक्षों से कहीं अधिक समय लगा ({value:.0f} दिन बनाम सामान्य {median:.0f})"
+    low:
+      en: "Sanctioned much faster than peers ({value:.0f} days vs {median:.0f} typical)"
+      hi: "समकक्षों से बहुत तेज़ी से स्वीकृत ({value:.0f} दिन बनाम सामान्य {median:.0f})"
+  execution_time:
+    high:
+      en: "Execution took far longer than peers ({value:.0f} days vs {median:.0f} typical)"
+      hi: "कार्य पूरा होने में समकक्षों से कहीं अधिक समय लगा ({value:.0f} दिन बनाम सामान्य {median:.0f})"
+    low:
+      en: "Completed far faster than peers ({value:.0f} days vs {median:.0f} typical)"
+      hi: "समकक्षों से कहीं तेज़ी से पूर्ण ({value:.0f} दिन बनाम सामान्य {median:.0f})"
+  stalled:
+    high:
+      en: "Open for {value:.0f} days since sanction, far longer than peers"
+      hi: "स्वीकृति के बाद {value:.0f} दिनों से अपूर्ण, समकक्षों से कहीं अधिक"
+    low:
+      en: "Recently sanctioned relative to peers"
+      hi: "समकक्षों की तुलना में हाल ही में स्वीकृत"
+  money_flow:
+    high:
+      en: "Fund disbursement pattern is unusual for {peer}"
+      hi: "{peer} के लिए धनराशि वितरण का स्वरूप असामान्य है"
+    low:
+      en: "Little or no disbursement recorded relative to peers"
+      hi: "समकक्षों की तुलना में बहुत कम या कोई वितरण दर्ज नहीं"
+  vendor_scale:
+    high:
+      en: "Vendor handles {value:.0f} works, far above the typical {median:.0f}"
+      hi: "विक्रेता {value:.0f} कार्य संभालता है, जो सामान्य {median:.0f} से कहीं अधिक है"
+    low:
+      en: "Vendor has an unusually small workload for this area"
+      hi: "इस क्षेत्र के लिए विक्रेता का कार्यभार असामान्य रूप से कम है"
+  vendor_concentration:
+    high:
+      en: "Vendor holds {value:.0%} of this district's works, a high concentration"
+      hi: "विक्रेता के पास इस जिले के {value:.0%} कार्य हैं, जो उच्च संकेंद्रण है"
+    low:
+      en: "Vendor concentration in this district is unusually low"
+      hi: "इस जिले में विक्रेता संकेंद्रण असामान्य रूप से कम है"
+  vendor_reach:
+    high:
+      en: "Vendor operates across an unusually wide area"
+      hi: "विक्रेता असामान्य रूप से विस्तृत क्षेत्र में कार्यरत है"
+    low:
+      en: "Vendor operates in an unusually narrow area"
+      hi: "विक्रेता असामान्य रूप से सीमित क्षेत्र में कार्यरत है"
+  vendor_pricing:
+    high:
+      en: "This vendor's works price consistently above peers"
+      hi: "इस विक्रेता के कार्यों की कीमत लगातार समकक्षों से अधिक है"
+    low:
+      en: "This vendor's works price consistently below peers"
+      hi: "इस विक्रेता के कार्यों की कीमत लगातार समकक्षों से कम है"
+  ida_context:
+    high:
+      en: "District's sanctioning pattern is unusual"
+      hi: "जिले का स्वीकृति स्वरूप असामान्य है"
+    low:
+      en: "District's sanctioning pattern is unusual"
+      hi: "जिले का स्वीकृति स्वरूप असामान्य है"
+  ida_performance:
+    high:
+      en: "District completion rate is unusually high for its volume"
+      hi: "जिले की पूर्णता दर उसके कार्यभार के लिए असामान्य रूप से अधिक है"
+    low:
+      en: "District completes only {value:.0%} of its works"
+      hi: "जिला अपने केवल {value:.0%} कार्य पूर्ण करता है"
+  mp_context:
+    high:
+      en: "Constituency sanctioning pattern is unusual"
+      hi: "निर्वाचन क्षेत्र का स्वीकृति स्वरूप असामान्य है"
+    low:
+      en: "Constituency sanctioning pattern is unusual"
+      hi: "निर्वाचन क्षेत्र का स्वीकृति स्वरूप असामान्य है"
+  mp_performance:
+    high:
+      en: "Completion rate for works in this constituency is unusually high"
+      hi: "इस निर्वाचन क्षेत्र के कार्यों की पूर्णता दर असामान्य रूप से अधिक है"
+    low:
+      en: "Only {value:.0%} of works recommended in this constituency are complete"
+      hi: "इस निर्वाचन क्षेत्र में संस्तुत केवल {value:.0%} कार्य पूर्ण हैं"
+
+# --- Duplicate and split layers --------------------------------------------
+duplicates:
+  pair:
+    en: "Possible duplicate of {other_id} in the same constituency ({similarity:.0%} similar, sanctioned {days_apart:.0f} days apart)"
+    hi: "उसी निर्वाचन क्षेत्र में {other_id} की संभावित द्विप्रति ({similarity:.0%} समान, {days_apart:.0f} दिनों के अंतर पर स्वीकृत)"
+  cluster:
+    en: "One of {n_works} near-identical works in this constituency totalling {total_amount}"
+    hi: "इस निर्वाचन क्षेत्र में {n_works} लगभग समान कार्यों में से एक, कुल {total_amount}"
+split:
+  member:
+    en: "Part of {n_works} works to the same vendor within {window} days, together {total_amount} (above the {percentile}th percentile for {work_type}) while each is individually below the median"
+    hi: "एक ही विक्रेता को {window} दिनों के भीतर दिए गए {n_works} कार्यों में से एक, कुल {total_amount} ({work_type} के लिए {percentile}वें प्रतिशतक से अधिक) जबकि प्रत्येक अलग-अलग मध्यमान से कम है"
+
+# --- Delay layer -----------------------------------------------------------
+delay:
+  base:
+    en: "{probability:.0%} chance of running past {horizon_days} days without completion"
+    hi: "{horizon_days} दिनों में पूर्ण न होने की {probability:.0%} संभावना"
+  drivers:
+    ida_prior_delay_rate:
+      en: "this district has a slow track record"
+      hi: "इस जिले का रिकॉर्ड धीमा रहा है"
+    vendor_prior_delay_rate:
+      en: "this vendor has a slow track record"
+      hi: "इस विक्रेता का रिकॉर्ड धीमा रहा है"
+    ida_prior_works:
+      en: "based on this district's history"
+      hi: "इस जिले के इतिहास के आधार पर"
+    vendor_prior_works:
+      en: "based on this vendor's history"
+      hi: "इस विक्रेता के इतिहास के आधार पर"
+    log_amount:
+      en: "works of this value tend to run long"
+      hi: "इस मूल्य के कार्य प्रायः लंबे खिंचते हैं"
+    work_type:
+      en: "this type of work tends to run long"
+      hi: "इस प्रकार के कार्य प्रायः लंबे खिंचते हैं"
+    state:
+      en: "typical for this state"
+      hi: "इस राज्य के लिए सामान्य"
+    days_to_sanction:
+      en: "sanctioning was already slow"
+      hi: "स्वीकृति पहले ही धीमी रही"
+    is_march_sanction:
+      en: "sanctioned in the March year-end rush"
+      hi: "मार्च के वर्षांत की भीड़ में स्वीकृत"
+    sanction_month:
+      en: "timing of sanction in the year"
+      hi: "वर्ष में स्वीकृति का समय"
+    fiscal_year:
+      en: "sanction year"
+      hi: "स्वीकृति वर्ष"
+    chamber:
+      en: "typical for this house"
+      hi: "इस सदन के लिए सामान्य"
+    work_category:
+      en: "typical for this category"
+      hi: "इस श्रेणी के लिए सामान्य"
+    ida_prior_median_days_to_sanction:
+      en: "this district sanctions slowly"
+      hi: "यह जिला धीमी गति से स्वीकृति देता है"
+  joiner:
+    en: "{base}: {driver}"
+    hi: "{base}: {driver}"
+
+# --- Fallback --------------------------------------------------------------
+fallback:
+  en: "Flagged by the statistical model as unusual for {peer}; no single dominant reason"
+  hi: "{peer} के लिए सांख्यिकीय मॉडल द्वारा असामान्य चिह्नित; कोई एकल प्रमुख कारण नहीं"
+
+# --- Band labels -----------------------------------------------------------
+bands:
+  Low:
+    en: "Low"
+    hi: "कम"
+  Medium:
+    en: "Medium"
+    hi: "मध्यम"
+  High:
+    en: "High"
+    hi: "उच्च"
+  Critical:
+    en: "Critical"
+    hi: "अति गंभीर"
