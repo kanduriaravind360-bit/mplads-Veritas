@@ -108,3 +108,8 @@ presentation:
 public:
   # The citizen view never shows per-work risk, and never names an MP or vendor.
   min_works_to_show_district: 5
+
+# An open work at or above this predicted delay probability counts as "high delay
+# risk" on the Delays page, the MP Portfolio and the fund-lapse estimate.
+predictions:
+  high_delay_risk: 0.7

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query
 
 from backend.app import queries
 from backend.app.deps import Context, context
+from backend.app.geo import map_key
 
 router = APIRouter(prefix="/geo", tags=["geo"])
 
@@ -29,7 +30,15 @@ def districts(
     }[metric]
     return {
         "metric": metric,
-        "rows": [{**r, "district": r["key"], "value": value_of(r)} for r in rows],
+        "rows": [
+            {
+                **r,
+                "district": r["key"],
+                "map_key": map_key(r["state"], r["key"]),
+                "value": value_of(r),
+            }
+            for r in rows
+        ],
         "note": (
             "Districts are taken from the implementing agency (IDA) name. A district "
             "with fewer than 20 works is marked low_volume and should not be ranked."

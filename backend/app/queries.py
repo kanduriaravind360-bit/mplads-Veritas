@@ -88,10 +88,14 @@ def group_risk(
     at_risk_amount = case((w.c.band.in_(AT_RISK_BANDS), w.c.sanction_amount), else_=0.0)
     at_risk_n = case((w.c.band.in_(AT_RISK_BANDS), 1), else_=0)
     open_delay = case((w.c.is_open.is_(True), w.c.delay_risk), else_=None)
+    # District names repeat across states (Aurangabad, Bilaspur ...), so a
+    # district group is a (district, state) pair; other dimensions keep one row.
+    state_col = w.c.state if dimension == "district" else func.max(w.c.state)
+    group_by = (key, w.c.state) if dimension == "district" else (key,)
     stmt = (
         select(
             key.label("key"),
-            func.max(w.c.state).label("state"),
+            state_col.label("state"),
             func.count().label("works"),
             func.coalesce(func.sum(w.c.sanction_amount), 0.0).label("sanctioned"),
             func.coalesce(func.sum(w.c.total_fund_disbursed), 0.0).label("disbursed"),
@@ -103,7 +107,7 @@ def group_risk(
         )
         .select_from(w)
         .where(key.is_not(None), key != "")
-        .group_by(key)
+        .group_by(*group_by)
     )
     sort_col = {
         "money_at_risk": "money_at_risk",

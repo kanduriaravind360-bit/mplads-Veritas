@@ -126,3 +126,34 @@ def test_reload_keeps_reviewer_workflow(monkeypatch) -> None:  # type: ignore[no
     assert refreshed.risk_score == 55.5 and refreshed.severity == "Critical", "scores refresh"
     assert refreshed.status == "Under Review", "workflow survives a reload"
     session.close()
+
+
+def test_private_names_in_descriptions_are_masked() -> None:
+    from backend.app.redact import mask_private_names
+
+    assert (
+        mask_private_names("Sanjay Saroj S/o Ram Chandra Pasi ke Ghar ke samne Handpump")
+        == "[name] S/o [name] ke Ghar ke samne Handpump"
+    )
+    assert mask_private_names(r"VINOD SHARMA S\O SHIV RAM SHARMA K GHAR 01 NAG SOLAR LIGHT") == (
+        r"[name] S\O [name] K GHAR 01 NAG SOLAR LIGHT"
+    )
+    assert (
+        mask_private_names("street to house of Shri Manohar. The agency")
+        == "street to house of [name] The agency"
+    )
+    # C/o abbreviates "construction of" here and names no one.
+    assert (
+        mask_private_names("C/o Common Shed Thaud Dibber GP") == "C/o Common Shed Thaud Dibber GP"
+    )
+    assert mask_private_names("Construction of CC road at ward 12") == (
+        "Construction of CC road at ward 12"
+    )
+
+
+def test_vendor_graph_ids_do_not_carry_names(client, auth) -> None:  # type: ignore[no-untyped-def]
+    body = client.get("/api/network/vendors", headers=auth("ministry")).json()
+    vendor_ids = [n["id"] for n in body["nodes"] if n["type"] == "vendor"]
+    assert vendor_ids and all("Invented" not in i for i in vendor_ids)
+    ids = {n["id"] for n in body["nodes"]}
+    assert all(e["source"] in ids and e["target"] in ids for e in body["edges"])

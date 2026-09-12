@@ -12,6 +12,7 @@ Honest limits, stated in every response:
 
 from __future__ import annotations
 
+import hashlib
 import math
 from typing import Any
 
@@ -25,6 +26,11 @@ from backend.app.redact import pseudonym
 from backend.app.settings import get_settings
 
 router = APIRouter(prefix="/network", tags=["network"])
+
+
+def _node_id(name: str) -> str:
+    """Opaque node id, so a pseudonymised graph does not carry real names in its ids."""
+    return "v:" + hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
 
 
 def _label(name: str | None) -> str | None:
@@ -69,7 +75,7 @@ def vendor_graph(
     for name, works, value, mean_risk, high in vendor_rows:
         nodes.append(
             {
-                "id": f"v:{name}",
+                "id": _node_id(name),
                 "type": "vendor",
                 "label": _label(name),
                 "works": int(works),
@@ -84,7 +90,7 @@ def vendor_graph(
         districts[district] = districts.get(district, 0.0) + float(value)
         edges.append(
             {
-                "source": f"v:{name}",
+                "source": _node_id(name),
                 "target": f"d:{district}",
                 "type": "works_in",
                 "works": int(works),
@@ -103,8 +109,8 @@ def vendor_graph(
             if similarity <= score < 100:
                 edges.append(
                     {
-                        "source": f"v:{a}",
-                        "target": f"v:{b}",
+                        "source": _node_id(a),
+                        "target": _node_id(b),
                         "type": "similar_name",
                         "similarity": score / 100.0,
                     }

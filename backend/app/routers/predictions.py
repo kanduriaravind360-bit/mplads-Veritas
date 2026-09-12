@@ -10,6 +10,12 @@ from sqlalchemy import case, func, select
 from backend.app import models, queries
 from backend.app.deps import Context, Page, context, page
 from backend.app.serialize import work_summary
+from backend.app.settings import get_settings
+
+
+def _high_delay_risk() -> float:
+    return float(get_settings().api["predictions"]["high_delay_risk"])
+
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
@@ -44,7 +50,7 @@ def delay(
     high = ctx.db.execute(
         select(func.count(), func.coalesce(func.sum(w.c.sanction_amount), 0.0))
         .select_from(w)
-        .where(w.c.delay_risk >= 0.7)
+        .where(w.c.delay_risk >= _high_delay_risk())
     ).one()
     open_count = ctx.db.execute(select(func.count()).select_from(w)).scalar_one()
     return {
@@ -56,7 +62,7 @@ def delay(
             "open_works": int(open_count),
             "high_delay_risk_works": int(high[0]),
             "high_delay_risk_value": float(high[1]),
-            "threshold": 0.7,
+            "threshold": _high_delay_risk(),
         },
         "note": "Probability of an open work running past a year without completion (delay model, holdout ROC-AUC 0.909).",
     }
@@ -82,7 +88,7 @@ def fund_lapse(
             func.count(),
             func.coalesce(func.sum(undisbursed), 0.0),
             func.coalesce(func.sum(undisbursed * w.c.delay_risk), 0.0),
-            func.sum(case((w.c.delay_risk >= 0.7, 1), else_=0)),
+            func.sum(case((w.c.delay_risk >= _high_delay_risk(), 1), else_=0)),
         )
         .select_from(w)
         .group_by(w.c.district)

@@ -39,6 +39,8 @@ _ROUTERS = (
     "cases",
     "public",
     "admin",
+    "search",
+    "portfolio",
 )
 
 

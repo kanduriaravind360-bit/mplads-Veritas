@@ -7,6 +7,11 @@ mode every one of those is replaced with a stable pseudonym (the same person
 always gets the same one), in structured fields and inside free-text
 descriptions, before the response leaves the server.
 
+Descriptions also name private beneficiaries ("handpump in front of the house of
+Shri X", "X S/o Y ke ghar ke samne"), about 4% of works. Presentation mode masks
+the name words next to an honorific or a relation marker. It over-masks a little
+("Sri Ram Temple" becomes "[name] Temple"), which is the right way to fail.
+
 Places, work ids, amounts and scores are left as they are: they are what a
 reviewer needs, and they do not name a person.
 """
@@ -24,6 +29,81 @@ _PERSON_FIELDS = ("mp_name", "vendor_name")
 # Rajya Sabha rows carry the member's name, e.g. "Shri X (2022-28) (2022-2028)",
 # in the constituency field.
 _PERSON_LIKE = re.compile(r"^(shri|smt|dr|km|sushri|prof)\b|\(\d{4}-\d{2,4}\)", re.IGNORECASE)
+
+
+_HONORIFICS = frozenset(
+    "shri sri sh shree smt shrimati srimati sushri kumari km kum late lt mr mrs ms".split()
+)
+# S/o, D/o, W/o (son, daughter, wife of). C/o is left alone: in this data it
+# almost always abbreviates "construction of".
+_RELATION = re.compile(r"^[sdw]\s*[\\/.]\s*o\.?$", re.IGNORECASE)
+# Words that end a name: Hindi postpositions and the common place/structure words
+# that follow a name in these descriptions.
+_NAME_STOP = frozenset(
+    """ke ki ka k ko se tak me mein par pe ji ghar makan house home residence resident
+    near of in at the and to from for village gram vill ward no road gali marg temple
+    mandir school son daughter wife r/o block district po ps teh tehsil""".split()
+)
+_MASK = "[name]"
+_MAX_NAME_WORDS = 3
+
+
+def _bare(token: str) -> str:
+    return token.strip(".,;:()[]{}\"'-").lower()
+
+
+def _is_name_word(token: str) -> bool:
+    bare = _bare(token)
+    return bool(bare) and bare.isalpha() and bare not in _NAME_STOP
+
+
+def mask_private_names(text: str | None) -> str | None:
+    """Mask words that name a private person next to an honorific or S/o, D/o, W/o."""
+    if not text:
+        return text
+    tokens = text.split()
+    masked = [False] * len(tokens)
+
+    def mask_forward(start: int) -> None:
+        taken = 0
+        i = start
+        while i < len(tokens) and taken < _MAX_NAME_WORDS:
+            bare = _bare(tokens[i])
+            if bare in _HONORIFICS:
+                masked[i] = True
+                i += 1
+                continue
+            if not _is_name_word(tokens[i]):
+                break
+            masked[i] = True
+            taken += 1
+            if tokens[i][-1:] in ",;:)":
+                break
+            i += 1
+
+    for i, token in enumerate(tokens):
+        bare = _bare(token)
+        if bare in _HONORIFICS:
+            masked[i] = True
+            mask_forward(i + 1)
+        elif _RELATION.match(token.strip(",;:()")):
+            back = i - 1
+            taken = 0
+            while back >= 0 and taken < _MAX_NAME_WORDS and _is_name_word(tokens[back]):
+                if tokens[back][-1:] in ",;:":
+                    break
+                masked[back] = True
+                taken += 1
+                back -= 1
+            mask_forward(i + 1)
+
+    out: list[str] = []
+    for token, hide in zip(tokens, masked, strict=True):
+        if not hide:
+            out.append(token)
+        elif not out or out[-1] != _MASK:
+            out.append(_MASK)
+    return " ".join(out)
 
 
 def _token(kind: str, value: str) -> str:
@@ -73,7 +153,7 @@ def redact_record(record: dict[str, Any], names: Iterable[str] = ()) -> dict[str
             replacements.setdefault(name, str(pseudonym("vendor", name)))
     for key in ("work_description", "example_description", "title", "summary"):
         if isinstance(out.get(key), str):
-            out[key] = scrub_text(out[key], replacements)
+            out[key] = mask_private_names(scrub_text(out[key], replacements))
     return out
 
 
