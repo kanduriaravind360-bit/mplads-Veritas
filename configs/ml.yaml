@@ -18,6 +18,8 @@ paths:
   scored_works: data/processed/scored_works.parquet
   duplicates: data/processed/duplicates.parquet
   split_groups: data/processed/split_groups.parquet
+  duplicate_pairs: data/processed/duplicate_pairs.parquet
+  holdout_scored: data/processed/holdout_scored.parquet
   alerts: data/processed/alerts.parquet
   rollup_state: data/processed/rollup_state.parquet
   rollup_ida: data/processed/rollup_ida.parquet

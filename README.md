@@ -49,6 +49,20 @@ The app only reads what the pipeline already wrote, so run `python -m ml.train`
 at least once first. A 3-minute presentation walkthrough is in
 [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
 
+Load the results into the application database and start the API (OpenAPI docs
+at http://127.0.0.1:8000/docs):
+
+```bash
+python -m backend.app.loader
+uvicorn backend.app.main:app --port 8000
+```
+
+Demo users, all with password `demo123`: `ministry@demo`, `state.up@demo`
+(Uttar Pradesh), `district.lucknow@demo` (Lucknow district office) and
+`mp.0147@demo` (MP code 147). Set `JWT_SECRET` before any deployment, and
+`PRESENTATION_MODE=1` for any screenshot, deck or public link: it replaces MP and
+vendor names with stable pseudonyms in every API response.
+
 Run the checks:
 
 ```bash
@@ -176,3 +190,18 @@ upload plus existing works in the same district, so the four demo road pieces
 are named a split work, with their 98% description similarity kept as supporting
 evidence. Uploads also count ages to the national data cut-off rather than the
 upload's own latest date.
+
+**Step 3b — backend API.** FastAPI, SQLAlchemy 2 and Pydantic v2 on SQLite
+(Postgres via `DATABASE_URL`). The loader brings in all 77,312 works, 10,749
+alerts (including 251 from the holdout), 69,174 duplicate pairs and 1,004 split
+groups in about 30 seconds, and a reload keeps reviewers' statuses and history.
+60 operations cover overview, works, alerts, duplicates, splits, vendor network,
+compliance, predictions, geo, analytics, models, ingest, PDF briefs, cases, a
+public citizen view, and a nightly re-score and escalation scheduler.
+
+Row-level scoping sits in one place and applies to every query, export, report
+and upload; an out-of-scope id answers 404, so the API does not confirm it
+exists. On the real data the Lucknow reviewer sees 270 works and 76 alerts, and
+asking for another state returns nothing. The audit trail is a SHA-256 hash
+chain, and tests show that editing, deleting or re-hashing any past event is
+detected. 88 API tests run on a synthetic database with invented names.

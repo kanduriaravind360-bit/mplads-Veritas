@@ -771,6 +771,10 @@ def _save_outputs(
         _to_parquet(alerts, resolve(paths["alerts"]))
     if not dup.clusters.empty:
         _to_parquet(dup.clusters, resolve(paths["duplicates"]))
+    if not dup.pairs.empty and "duplicate_pairs" in paths:
+        # The pair-level breakdown (cosine, fuzzy, location, amount) is what a
+        # reviewer needs to judge a duplicate side by side; clusters alone lose it.
+        _to_parquet(dup.pairs, resolve(paths["duplicate_pairs"]))
     if not splits.empty:
         _to_parquet(splits, resolve(paths["split_groups"]))
     for name, frame in rollups.items():

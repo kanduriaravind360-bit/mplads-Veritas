@@ -40,3 +40,9 @@ dist/
 Thumbs.db
 .idea/
 .vscode/
+
+# Application database and generated outputs (may contain real names)
+data/app/
+outbox/
+*.sqlite
+*.db

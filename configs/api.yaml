@@ -1,0 +1,110 @@
+# Backend configuration for MPLADS Sentinel (FastAPI).
+#
+# Per CLAUDE.md rule 5, thresholds and policy live here. Secrets do NOT: the JWT
+# secret and database URL come from environment variables (JWT_SECRET,
+# DATABASE_URL), with a development default that the app warns about.
+
+database:
+  # Overridden by the DATABASE_URL environment variable (e.g. postgresql+psycopg://...).
+  default_url: sqlite:///data/app/sentinel.db
+
+auth:
+  token_minutes: 480
+  algorithm: HS256
+  pbkdf2_iterations: 240000
+
+roles: [MINISTRY, STATE, DISTRICT, MP]
+
+# Demo users. Scopes are resolved against the loaded data:
+#   state.up        -> every work in Uttar Pradesh
+#   district.lucknow-> every work whose IDA is the Lucknow district office
+#   mp.0147         -> works carrying MP code 147 in their work id
+# The MP code in the email is zero-padded for readability; the data uses 147.
+demo_users:
+  password: demo123
+  users:
+    - email: ministry@demo
+      name: Ministry reviewer (demo)
+      role: MINISTRY
+    - email: state.up@demo
+      name: State nodal officer, Uttar Pradesh (demo)
+      role: STATE
+      state: Uttar Pradesh
+    - email: district.lucknow@demo
+      name: District reviewer, Lucknow (demo)
+      role: DISTRICT
+      ida_contains: LUCKNOW
+    - email: mp.0147@demo
+      name: MP portfolio viewer (demo)
+      role: MP
+      mp_code: "147"
+
+# Alert lifecycle. Every transition is written to the tamper-evident audit trail.
+alerts:
+  initial_status: Open
+  statuses: [Open, Under Review, Confirmed, False positive, Resolved]
+  closed_statuses: [Confirmed, False positive, Resolved]
+  # from-status -> allowed to-statuses
+  transitions:
+    Open: [Under Review]
+    Under Review: [Confirmed, False positive, Resolved, Open]
+    Confirmed: [Resolved, Under Review]
+    False positive: [Under Review]
+    Resolved: [Under Review]
+  # Reopening a closed alert is a supervisory act.
+  reopen_roles: [MINISTRY, STATE]
+  # MPs see implementation risk on their own works; they do not review alerts.
+  reviewer_roles: [MINISTRY, STATE, DISTRICT]
+  verdicts: [confirmed, false_positive, not_duplicate, needs_more_info]
+
+# An alert still Open (never picked up) at district level beyond these many days
+# escalates to the state; still Open at state level, to the ministry. Days count
+# from when the alert was raised, or from its last escalation.
+escalation:
+  district_to_state_days: 15
+  state_to_ministry_days: 30
+
+scheduler:
+  enabled: true
+  rescore_cron_hour: 2
+  rescore_cron_minute: 0
+  escalation_interval_minutes: 60
+  # The nightly job re-runs the pipeline without the injection test.
+  rescore_command: [python, -m, ml.train, --skip-injection]
+
+ingest:
+  max_rows: 20000
+  max_errors_reported: 200
+  required_columns:
+    - work_id
+    - state
+    - ida
+    - constituency
+    - work_description
+    - recommended_date
+    - sanction_date
+    - sanction_amount
+    - work_status
+
+pagination:
+  default_limit: 50
+  max_limit: 500
+
+# Scheme-rule estimate for the fund-flow funnel. The eSAKSHI extract carries no
+# entitlement or release figures, so entitlement is estimated as
+# MPs in scope x Rs 5 crore x financial years covered, and labelled as such.
+scheme:
+  entitlement_per_mp_per_year: 50000000
+  financial_years_covered: [2023-24, 2024-25, 2025-26, 2026-27]
+
+# Presentation mode (env PRESENTATION_MODE=1): MP names, vendor names and
+# Rajya Sabha "constituency" fields (which hold the member's own name) are
+# replaced with stable pseudonyms in every API response. Use it for any
+# screenshot, deck or public deployment; the repository is public.
+presentation:
+  mp_prefix: MP
+  vendor_prefix: Vendor
+
+public:
+  # The citizen view never shows per-work risk, and never names an MP or vendor.
+  min_works_to_show_district: 5

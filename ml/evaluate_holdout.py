@@ -78,6 +78,17 @@ def evaluate(
 
     works = holdout_module.load(cfg)
     scored = score_new_works(works, cfg)
+    if "holdout_scored" in cfg["paths"]:
+        # Kept so the application can show every real work, holdout included,
+        # without re-scoring the holdout on every load.
+        from ml.config import resolve
+        from ml.pipeline import _as_json
+
+        out = scored.copy()
+        for column in ("unsup_reasons", "supervised_reasons", "delay_reasons"):
+            if column in out and not out[column].map(lambda v: isinstance(v, str)).all():
+                out[column] = _as_json(out[column])
+        out.to_parquet(resolve(cfg["paths"]["holdout_scored"]), index=False)
 
     train_delay = train_metrics.get("delay_model", {})
     holdout_delay = _delay_metrics(scored, scored.get("delay_risk", pd.Series(dtype=float)), cfg)
