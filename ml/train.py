@@ -66,6 +66,31 @@ def _summary(metrics: dict[str, Any]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _previous_injection_metrics(cfg: dict[str, Any]) -> dict[str, Any] | None:
+    """The injection block from the last metrics.json, if there is one."""
+    import json
+
+    from ml.config import resolve
+
+    path = resolve(cfg["paths"]["metrics"])
+    if not path.exists():
+        return None
+    try:
+        previous = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    carried = previous.get("injection_test")
+    if not isinstance(carried, dict):
+        return None
+    carried = dict(carried)
+    carried["carried_forward"] = True
+    carried["carried_forward_note"] = (
+        "Not recomputed in this run (--skip-injection). These figures come from the last full run."
+    )
+    return carried
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the MPLADS Sentinel ML pipeline.")
     parser.add_argument("--config", default="ml", help="config name under configs/")
@@ -86,6 +111,13 @@ def main(argv: list[str] | None = None) -> int:
     if not args.skip_injection:
         print("\ninjection test (re-runs detectors on planted anomalies):")
         injection = run_injection_test(cfg)
+    else:
+        # Carry the previous run's evaluation forward. Skipping the test must
+        # mean "do not recompute", not "delete the evaluation that the demo app
+        # and the model-performance page read".
+        injection = _previous_injection_metrics(cfg)
+        if injection:
+            print("\ninjection test skipped; carrying forward the previous results")
 
     path = write_metrics(result.metrics, injection, result.feature_names, cfg)
 

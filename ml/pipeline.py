@@ -348,6 +348,11 @@ def run(
         # detector on its own.
         scored["dup_score"] = dup.dup_score.to_numpy()
         scored["split_score"] = in_split.to_numpy()
+        # The raw predicted probability, alongside the fused "delay" signal which
+        # is that probability minus the base rate. Reviewers need the plain
+        # probability ("68% chance of running past a year"); the excess is only
+        # meaningful inside the fusion.
+        scored["delay_risk"] = delay_risk.to_numpy()
         # The per-detector attributions are (feature, value) tuples. Parquet
         # cannot infer a type for those, so they are stored as JSON strings,
         # which is also what the backend will hand to the dashboard.

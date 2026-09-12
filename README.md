@@ -33,6 +33,22 @@ Build the cleaned dataset:
 python -m ml.data
 ```
 
+Run the whole ML pipeline (about 3 minutes on an RTX 5060):
+
+```bash
+python -m ml.train
+```
+
+Open the demo app:
+
+```bash
+streamlit run demo_app.py
+```
+
+The app only reads what the pipeline already wrote, so run `python -m ml.train`
+at least once first. A 3-minute presentation walkthrough is in
+[docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
+
 Run the checks:
 
 ```bash
@@ -113,3 +129,13 @@ The split-work detector is our weakest at 46% and is the main open item. Global
 rank recall is kept in `models/metrics.json` for continuity, labelled as
 misleading. Precision inside each queue counts only planted cases as hits, so a
 genuine anomaly ranked high scores as a miss; read it as a floor.
+
+**Step 2c — Streamlit demo app.** `streamlit run demo_app.py` opens a seven-page
+presentation app over the pipeline output: overview, risk explorer with a
+per-work evidence panel, top risks, duplicates and split works, delay early
+warning, model performance, and live scoring of an uploaded CSV. It reads the
+saved artefacts only and never retrains, so it opens in about a second.
+
+The Model Performance page carries the caveats rather than hiding them: the
+proxy-label warning and the split-work detector at 46%. This is a temporary demo
+for the hackathon round; the role-based dashboard comes later.
