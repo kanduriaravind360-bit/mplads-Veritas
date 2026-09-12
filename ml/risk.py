@@ -227,6 +227,11 @@ def _deviation_reason(
 
 def _rule_reasons(row: pd.Series, templates: dict[str, Any]) -> list[tuple[str, str]]:
     """Render the dataset's own flag_reasons text via the template table."""
+    return [(en, hi) for _part, en, hi in _rule_reasons_tagged(row, templates)]
+
+
+def _rule_reasons_tagged(row: pd.Series, templates: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """Like :func:`_rule_reasons`, but keeps which rule text each reason came from."""
     # Prefer our recomputed rule text: it reflects the data actually scored.
     raw = str(row.get("rule_reasons") or row.get("flag_reasons") or "")
     if not raw or raw == "No rule-based flags":
@@ -242,16 +247,65 @@ def _rule_reasons(row: pd.Series, templates: dict[str, Any]) -> list[tuple[str, 
         "work_type": row.get("work_type", ""),
         "work_status": row.get("work_status", ""),
     }
-    out: list[tuple[str, str]] = []
+    out: list[tuple[str, str, str]] = []
     for part in (p.strip() for p in raw.split(";")):
         tpl = templates["rules"].get(part)
         if tpl is None:
             continue
         try:
+            out.append((part, tpl["en"].format(**fields), tpl["hi"].format(**fields)))
+        except (KeyError, ValueError):
+            out.append((part, part, part))
+    return out
+
+
+def _severe_reasons(
+    row: pd.Series, templates: dict[str, Any]
+) -> tuple[list[tuple[str, str]], set[str]]:
+    """Reasons for the severe rules that fired, and the rule texts they replace."""
+    from ml.rules import RULE_TEXT
+
+    block = templates.get("severe", {})
+    fields = {
+        "duration_days": _as_float(row.get("duration_days")),
+        "days_since_sanction": _as_float(row.get("days_since_sanction_open"))
+        or _as_float(row.get("days_since_sanction")),
+        "work_status": row.get("work_status", ""),
+        "work_type": row.get("work_type", ""),
+    }
+    out: list[tuple[str, str]] = []
+    replaced: set[str] = set()
+    for key, tpl in block.items():
+        if not bool(row.get(key, False)):
+            continue
+        try:
             out.append((tpl["en"].format(**fields), tpl["hi"].format(**fields)))
         except (KeyError, ValueError):
-            out.append((part, part))
-    return out
+            continue
+        rule_column = "rule_" + key.removeprefix("severe_")
+        if rule_column in RULE_TEXT:
+            replaced.add(RULE_TEXT[rule_column])
+    return out, replaced
+
+
+def _cost_reason(row: pd.Series, templates: dict[str, Any]) -> tuple[str, str] | None:
+    """Name the cost channel that fired, with its multiple, e.g. 2.5x the state median."""
+    channel = str(row.get("cost_channel") or "")
+    if not channel or _as_float(row.get("cost_signal")) <= 0:
+        return None
+    tpl = templates.get("cost", {}).get(channel)
+    if tpl is None:
+        return None
+    fields = {
+        "ratio": _as_float(row.get("cost_ratio")),
+        "peer": row.get("state_peer_label") or row.get("peer_label", ""),
+        "expected": format_inr(_as_float(row.get("expected_cost_amount"))),
+        "amount": format_inr(_as_float(row.get("sanction_amount"))),
+    }
+    try:
+        return tpl["en"].format(**fields), tpl["hi"].format(**fields)
+    except (KeyError, ValueError):
+        return None
 
 
 def build_reasons(
@@ -298,14 +352,23 @@ def build_reasons(
             dup_partner.setdefault(b, (a, float(score), float(days)))
 
     split_info: dict[str, dict[str, Any]] = {}
+    split_members: dict[str, set[str]] = {}
     if not splits.empty:
         for _, grp in splits.iterrows():
-            for work_id in str(grp["work_ids"]).split(","):
+            members = set(str(grp["work_ids"]).split(","))
+            for work_id in members:
+                split_members[work_id] = members
                 split_info[work_id] = {
                     "n_works": int(grp["n_works"]),
                     "total_amount": format_inr(float(grp["total_amount"])),
                     "work_type": str(grp["work_type"]),
+                    "same_vendor": bool(grp.get("same_vendor", False)),
+                    "span_days": _as_float(grp.get("span_days")),
                 }
+
+    from ml.rules import RULE_TEXT
+
+    cost_rule_text = RULE_TEXT["rule_cost_outlier"]
 
     en_out: list[list[str]] = []
     hi_out: list[list[str]] = []
@@ -313,30 +376,70 @@ def build_reasons(
     for pos, (_idx, row) in enumerate(context.iterrows()):
         en: list[str] = []
         hi: list[str] = []
+        work_id = row["work_id"]
 
-        for text_en, text_hi in _rule_reasons(row, templates):
+        # Order matters, because the list is truncated to max_reasons: the most
+        # direct evidence first, weak statistical hints last.
+
+        # 1. Severe rules, which on their own put a work in the review queue.
+        severe, replaced = _severe_reasons(row, templates)
+        for text_en, text_hi in severe:
             en.append(text_en)
             hi.append(text_hi)
 
-        work_id = row["work_id"]
-        if work_id in dup_partner:
-            other, score, days = dup_partner[work_id]
-            tpl = templates["duplicates"]["pair"]
-            fields = {"other_id": other, "similarity": score, "days_apart": days}
-            en.append(tpl["en"].format(**fields))
-            hi.append(tpl["hi"].format(**fields))
+        # 2. The cost channel that fired, named: "2.5x the median for Solar Light
+        #    in Uttar Pradesh" or "2.1x the cost predicted from this description".
+        cost_reason = _cost_reason(row, templates)
+        if cost_reason:
+            en.append(cost_reason[0])
+            hi.append(cost_reason[1])
+            replaced.add(cost_rule_text)
 
+        # 3. A split group names the split pattern. When its pieces also read
+        #    as duplicates of each other, the similarity is supporting evidence
+        #    for the split, not a separate duplicate finding.
+        absorbed_duplicate = False
         if work_id in split_info:
-            tpl = templates["split"]["member"]
+            info = split_info[work_id]
+            key = "member_same_vendor" if info["same_vendor"] else "member"
+            tpl = templates["split"].get(key, templates["split"]["member"])
             fields = {
-                **split_info[work_id],
+                **info,
                 "window": int(split_cfg["days_window"]),
                 "percentile": int(split_cfg["combined_percentile"]),
             }
             en.append(tpl["en"].format(**fields))
             hi.append(tpl["hi"].format(**fields))
 
+            partner = dup_partner.get(work_id)
+            if partner and partner[0] in split_members.get(work_id, set()):
+                support = templates["split"].get("supporting_duplicate")
+                if support:
+                    sfields = {"other_id": partner[0], "similarity": partner[1]}
+                    en.append(support["en"].format(**sfields))
+                    hi.append(support["hi"].format(**sfields))
+                absorbed_duplicate = True
+
+        # 4. A duplicate that is not part of a split.
+        if work_id in dup_partner and not absorbed_duplicate:
+            other, score, days = dup_partner[work_id]
+            tpl = templates["duplicates"]["pair"]
+            fields = {"other_id": other, "similarity": score, "days_apart": days}
+            en.append(tpl["en"].format(**fields))
+            hi.append(tpl["hi"].format(**fields))
+
+        # 5. The remaining rule texts, minus any a stronger reason above replaced.
+        for part, text_en, text_hi in _rule_reasons_tagged(row, templates):
+            if part in replaced:
+                continue
+            en.append(text_en)
+            hi.append(text_hi)
+
+        # 6. Statistical deviations. A cost deviation is dropped when a named
+        #    cost channel already explained the price.
         for feature, z in unsup_reasons.iloc[pos] or []:
+            if cost_reason and FEATURE_FAMILY.get(feature) == "cost":
+                continue
             rendered = _deviation_reason(feature, z, row, peer_stats, templates)
             if rendered:
                 en.append(rendered[0])
@@ -418,12 +521,61 @@ def score(
     )
     risk = fuse(signals, is_open, cfg)
     if cuts is None:
+        # Cut-offs come from the BASE distribution, before the severe floor.
+        # Deriving them afterwards would be circular: the floor moves scores,
+        # which moves the percentiles, which moves the floor.
         cuts = band_cutoffs(risk, cfg)
 
+    base = risk.copy()
+    risk, floored = apply_severe_floor(risk, df, cuts, cfg)
+
     out = signals.copy()
+    out["base_risk_score"] = base.round(2)
     out["risk_score"] = risk.round(2)
     out["band"] = [band_for(v, cfg, cuts) for v in risk]
+    out["severe_floor_applied"] = floored.to_numpy()
     return out
+
+
+def apply_severe_floor(
+    risk: pd.Series,
+    df: pd.DataFrame,
+    cuts: dict[str, float],
+    cfg: dict[str, Any] | None = None,
+) -> tuple[pd.Series, pd.Series]:
+    """Lift works where severe rules fired into the High or Critical band.
+
+    One severe rule lifts a work to at least the High boundary, two or more to
+    at least Critical. A lifted work lands in the bottom ``floor_headroom`` slice
+    of its band, ordered there by its original score, so floored works are not
+    all tied at one value. Works already above their floor are left untouched.
+
+    Returns the adjusted scores and a mask of which works were lifted.
+    """
+    cfg = cfg or load_config("ml")
+    lifted = pd.Series(False, index=risk.index)
+    if "severe_rule_count" not in df.columns:
+        return risk, lifted
+
+    fcfg = cfg["rules"]["severe_floor"]
+    headroom = float(fcfg.get("floor_headroom", 0.25))
+    count = pd.to_numeric(df["severe_rule_count"], errors="coerce").fillna(0).to_numpy()
+
+    high = float(cuts[str(fcfg["one_rule"])])
+    critical = float(cuts[str(fcfg["two_or_more"])])
+    # Width of the band each floor lifts into; Critical runs up to 100.
+    floor = np.where(count >= 2, critical, np.where(count >= 1, high, np.nan))
+    ceiling = np.where(count >= 2, 100.0, critical)
+
+    values = risk.to_numpy(dtype="float64")
+    needs_lift = ~np.isnan(floor) & (values < np.nan_to_num(floor, nan=np.inf))
+    slice_width = headroom * (ceiling - floor)
+    position = np.clip(values / np.where(floor > 0, floor, 1.0), 0.0, 1.0)
+    lifted_values = floor + slice_width * position
+
+    adjusted = np.where(needs_lift, lifted_values, values)
+    lifted = pd.Series(needs_lift, index=risk.index)
+    return pd.Series(adjusted, index=risk.index, name=risk.name), lifted
 
 
 def _rollup(scored: pd.DataFrame, key: str, label: str, cfg: dict[str, Any]) -> pd.DataFrame:

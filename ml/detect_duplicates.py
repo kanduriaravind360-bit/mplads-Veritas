@@ -361,13 +361,53 @@ def _just_below_round(amount: float, tolerance: float) -> bool:
     return False
 
 
-def find_split_works(df: pd.DataFrame, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
+def fit_split_peer_stats(peered: pd.DataFrame, cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Peer median and p90 per peer group, fitted on the training corpus.
+
+    Saved so that scoring an upload judges "below the median" and "jointly above
+    the 90th percentile" against the national picture. Computed from a 13-row
+    upload instead, the median is whatever those 13 rows happen to be, which is
+    why four split road pieces were reported as duplicates rather than a split.
+    """
+    cfg = cfg or load_config("ml")
+    pct = float(cfg["duplicates"]["split_works"]["combined_percentile"])
+    amount = pd.to_numeric(peered["sanction_amount"], errors="coerce").astype("float64")
+    grouped = amount.groupby(peered["peer_group"].astype(str))
+    fine = peered["work_type"].astype(str) + " | " + peered["state"].astype(str)
+    return {
+        "median": {str(k): float(v) for k, v in grouped.median().items()},
+        "p90": {str(k): float(v) for k, v in grouped.quantile(pct / 100.0).items()},
+        "fine_counts": {str(k): int(v) for k, v in fine.value_counts().items()},
+        "min_group": int(cfg["features"]["peer_min_group"]),
+        "fitted_on_rows": int(len(peered)),
+    }
+
+
+def peer_groups_from_stats(df: pd.DataFrame, stats: dict[str, Any]) -> pd.Series:
+    """Assign peer groups exactly as training did, using the saved group sizes."""
+    fine = df["work_type"].astype(str) + " | " + df["state"].astype(str)
+    coarse = df["work_type"].astype(str) + " | ALL-INDIA"
+    counts = fine.map(stats["fine_counts"]).fillna(0)
+    return pd.Series(
+        np.where(counts >= int(stats["min_group"]), fine, coarse), index=df.index, name="peer_group"
+    )
+
+
+def find_split_works(
+    df: pd.DataFrame,
+    cfg: dict[str, Any] | None = None,
+    peer_stats: dict[str, Any] | None = None,
+) -> pd.DataFrame:
     """Find groups of small works that look like one large work broken up.
 
     Same district and work type, overlapping location words, sanctioned inside a
     short window, each below the peer median, jointly above the peer 90th
     percentile. A shared vendor raises the score but is not required: vendor is
     missing for about 20% of works and demanding it discarded most groups.
+
+    ``peer_stats`` supplies saved training medians and p90s. Without it they are
+    computed from ``df``, which is right for the full corpus and wrong for a
+    small upload.
     """
     cfg = cfg or load_config("ml")
     dcfg = cfg["duplicates"]
@@ -386,9 +426,16 @@ def find_split_works(df: pd.DataFrame, cfg: dict[str, Any] | None = None) -> pd.
         return pd.DataFrame()
 
     amount = pd.to_numeric(work["sanction_amount"], errors="coerce").astype("float64")
-    peer = work["peer_group"] if "peer_group" in work.columns else work["work_type"].astype(str)
-    work["_peer_median"] = amount.groupby(peer).transform("median")
-    work["_peer_p90"] = amount.groupby(peer).transform(lambda s: s.quantile(pct / 100.0))
+    if peer_stats is not None:
+        peer = peer_groups_from_stats(work, peer_stats)
+        # A peer group training never saw has no median to compare against, so
+        # its works cannot be judged "below the median" and drop out below.
+        work["_peer_median"] = peer.map(peer_stats["median"]).astype("float64")
+        work["_peer_p90"] = peer.map(peer_stats["p90"]).astype("float64")
+    else:
+        peer = work["peer_group"] if "peer_group" in work.columns else work["work_type"].astype(str)
+        work["_peer_median"] = amount.groupby(peer).transform("median")
+        work["_peer_p90"] = amount.groupby(peer).transform(lambda s: s.quantile(pct / 100.0))
 
     stopwords = frozenset(dcfg["location_stopwords"])
     norm = _normalise(work["work_description"])

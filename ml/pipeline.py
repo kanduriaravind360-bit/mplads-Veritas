@@ -23,7 +23,7 @@ from ml.detect_anomaly import detect
 from ml.detect_duplicates import find_duplicates, find_split_works, split_membership
 from ml.features import build_features, build_peer_groups, save_feature_list
 from ml.gpu import device_name, set_seed, torch_device
-from ml.risk import build_reasons, build_rollups, score
+from ml.risk import band_for, build_reasons, build_rollups, score
 from ml.work_type import assign_work_type, embed_descriptions, work_type_counts
 
 
@@ -141,15 +141,123 @@ def precompute_demo_embeddings(cfg: dict[str, Any] | None = None) -> dict[str, s
     return out
 
 
+#: Columns split detection needs from the existing corpus when scoring an upload.
+_CONTEXT_COLUMNS = (
+    "work_id",
+    "ida",
+    "constituency",
+    "state",
+    "work_type",
+    "work_description",
+    "sanction_date",
+    "sanction_amount",
+    "vendor_name",
+)
+
+
+def _with_corpus_context(works: pd.DataFrame, cfg: dict[str, Any]) -> tuple[pd.DataFrame, set[str]]:
+    """The batch plus already-scored works from the same districts.
+
+    Split pieces share a district by definition, so only those districts are
+    loaded, which keeps an upload fast. Returns the combined frame and the set of
+    batch work ids, so callers can keep only groups that touch the batch.
+    """
+    batch_ids = set(works["work_id"].astype(str))
+    path = resolve(cfg["paths"]["scored_works"])
+    if not path.exists():
+        return works, batch_ids
+
+    districts = set(works["ida"].astype(str))
+    corpus = pd.read_parquet(path, columns=list(_CONTEXT_COLUMNS))
+    corpus = corpus.loc[
+        corpus["ida"].astype(str).isin(districts) & ~corpus["work_id"].astype(str).isin(batch_ids)
+    ]
+    if corpus.empty:
+        return works, batch_ids
+
+    wanted = [c for c in _CONTEXT_COLUMNS if c in works.columns]
+    combined = pd.concat([works[wanted], corpus[wanted]], ignore_index=True)
+    combined["sanction_date"] = pd.to_datetime(combined["sanction_date"], errors="coerce")
+    return combined, batch_ids
+
+
+def _split_absorbs(duplicates: pd.DataFrame, splits: pd.DataFrame) -> dict[str, str]:
+    """Duplicate clusters lying wholly inside one split group, mapped to that group."""
+    if duplicates.empty or splits.empty:
+        return {}
+    groups = [
+        (gid, set(str(ids).split(",")))
+        for gid, ids in zip(splits["split_group_id"], splits["work_ids"], strict=True)
+    ]
+    absorbed: dict[str, str] = {}
+    for dup_id, ids in zip(duplicates["dup_group_id"], duplicates["work_ids"], strict=True):
+        members = set(str(ids).split(","))
+        for gid, split_members in groups:
+            if members <= split_members:
+                absorbed[str(dup_id)] = str(gid)
+                break
+    return absorbed
+
+
+def _split_alert_reasons(row: pd.Series, similarity: dict[str, float], lang: str) -> list[str]:
+    """Name the split pattern first; description similarity only as support."""
+    from ml.risk import format_inr
+
+    n = int(row["n_works"])
+    total = format_inr(float(row["total_amount"]))
+    days = float(row.get("span_days") or 0.0)
+    same_vendor = bool(row.get("same_vendor", False))
+    sim = similarity.get(str(row["split_group_id"]))
+
+    if lang == "hi":
+        who = "एक ही विक्रेता को " if same_vendor else "इसी जिले में "
+        out = [
+            f"संभावित विभाजित कार्य: {who}{days:.0f} दिनों में {n} कार्य, कुल {total}, "
+            "प्रत्येक समकक्ष मध्यमान से कम"
+        ]
+        if sim is not None:
+            out.append(f"सहायक साक्ष्य: इन कार्यों के विवरण {sim:.0%} तक समान हैं")
+        return out
+
+    who = "to the same vendor" if same_vendor else "in the same district"
+    out = [
+        f"Possible split work: {n} works {who} within {days:.0f} days, "
+        f"together {total}, each below the peer median"
+    ]
+    if sim is not None:
+        out.append(f"Supporting evidence: the descriptions are up to {sim:.0%} similar")
+    return out
+
+
 def build_alerts(
     scored: pd.DataFrame,
     duplicates: pd.DataFrame,
     splits: pd.DataFrame,
     cfg: dict[str, Any],
+    dup_pairs: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Assemble the review queue: high-risk works plus duplicate and split groups."""
+    """Assemble the review queue: high-risk works plus duplicate and split groups.
+
+    A duplicate cluster that sits wholly inside a split group is not raised as
+    its own alert. Split pieces usually share near-identical wording, so the
+    similarity is evidence FOR the split, and reporting both would send a
+    reviewer the same works twice under two different stories.
+    """
     bands = set(cfg["risk"]["alert_bands"])
     rows: list[pd.DataFrame] = []
+
+    absorbed = _split_absorbs(duplicates, splits)
+    if absorbed:
+        duplicates = duplicates.loc[~duplicates["dup_group_id"].astype(str).isin(absorbed)]
+
+    # Highest description similarity among each split group's own pieces.
+    split_similarity: dict[str, float] = {}
+    if dup_pairs is not None and not dup_pairs.empty and not splits.empty:
+        for gid, ids in zip(splits["split_group_id"], splits["work_ids"], strict=True):
+            members = set(str(ids).split(","))
+            inside = dup_pairs["work_id_a"].isin(members) & dup_pairs["work_id_b"].isin(members)
+            if inside.any():
+                split_similarity[str(gid)] = float(dup_pairs.loc[inside, "pair_score"].max())
 
     flagged = scored.loc[scored["band"].isin(bands)].copy()
     if not flagged.empty:
@@ -220,12 +328,12 @@ def build_alerts(
                     "work_type": splits["work_type"].astype(str),
                     "amount": splits["total_amount"],
                     "reasons_en": [
-                        [f"{n} works to one vendor totalling {a:,.0f}, each below the peer median"]
-                        for n, a in zip(splits["n_works"], splits["total_amount"], strict=True)
+                        _split_alert_reasons(row, split_similarity, "en")
+                        for _, row in splits.iterrows()
                     ],
                     "reasons_hi": [
-                        [f"एक ही विक्रेता को {n} कार्य, कुल {a:,.0f}, प्रत्येक समकक्ष मध्यमान से कम"]
-                        for n, a in zip(splits["n_works"], splits["total_amount"], strict=True)
+                        _split_alert_reasons(row, split_similarity, "hi")
+                        for _, row in splits.iterrows()
                     ],
                 }
             )
@@ -334,8 +442,60 @@ def run(
         works["expected_log_amount"] = cost.predicted_log_amount.to_numpy()
         works["cost_residual"] = cost.residual.to_numpy()
         works["cost_residual_z"] = cost.residual_z.to_numpy()
-        works["cost_signal"] = cost.cost_signal.to_numpy()
+        works["expected_cost_signal"] = cost.cost_signal.to_numpy()
         metrics["expected_cost_model"] = cost.metrics
+
+    with timer.stage("state-relative cost"):
+        from ml import cost_peers
+
+        peers_path = resolve(cfg["paths"]["models_dir"]) / "cost_peers.joblib"
+        if not train_models and peers_path.exists():
+            # Scoring run: look the peer statistics up; never derive them from
+            # the uploaded batch.
+            import joblib
+
+            peer_artifact = joblib.load(peers_path)
+        else:
+            peer_artifact = cost_peers.fit(works, cfg)
+            models["cost_peers"] = peer_artifact
+
+        state_cost = cost_peers.apply(works, peer_artifact, cfg)
+        for column in state_cost.columns:
+            works[column] = state_cost[column].to_numpy()
+
+        amount = pd.to_numeric(works["sanction_amount"], errors="coerce").astype("float64")
+        expected_amount = np.expm1(works["expected_log_amount"].astype("float64"))
+        works["expected_cost_amount"] = expected_amount.round(0).to_numpy()
+        expected_ratio = (amount / pd.Series(expected_amount).replace(0, np.nan)).round(3)
+
+        combined = cost_peers.combine(works["expected_cost_signal"], state_cost, expected_ratio)
+        if bool(cfg["cost_state"].get("drive_cost_signal", False)):
+            for column in combined.columns:
+                works[column] = combined[column].to_numpy()
+        else:
+            # Descriptive only: the state comparison is kept for reviewers and
+            # the peer-comparison chart, but the score stays on the validated
+            # expected-cost channel. See configs/ml.yaml cost_state for why.
+            expected = works["expected_cost_signal"].astype("float64")
+            works["cost_signal"] = expected.to_numpy()
+            works["cost_channel"] = np.where(expected > 0, "expected", "")
+            works["cost_ratio"] = expected_ratio.to_numpy()
+        works["state_channel_would_fire"] = (combined["cost_channel"] == "state_peer").to_numpy()
+
+        metrics["cost_state_channel"] = {
+            "works_with_state_signal": int((works["state_cost_signal"] > 0).sum()),
+            "works_with_expected_signal": int((works["expected_cost_signal"] > 0).sum()),
+            "works_with_any_cost_signal": int((works["cost_signal"] > 0).sum()),
+            "drives_cost_signal": bool(cfg["cost_state"].get("drive_cost_signal", False)),
+            "works_where_state_channel_would_lead": int(works["state_channel_would_fire"].sum()),
+            "channel_that_fired": {
+                str(k): int(v) for k, v in works["cost_channel"].value_counts().items() if str(k)
+            },
+            "peer_scope_used": {
+                str(k): int(v) for k, v in works["state_peer_scope"].value_counts().items()
+            },
+            "source": "saved training artifact" if not train_models else "fitted on this run",
+        }
 
     with timer.stage("rule layer"):
         from ml.rules import agreement_with_shipped, compute_rules
@@ -343,6 +503,20 @@ def run(
         rules = compute_rules(works, cfg)
         for col in rules.columns:
             works[col] = rules[col].to_numpy()
+
+        from ml.rules import severe_rules_fired
+
+        severe = severe_rules_fired(works, rules, cfg)
+        for col in severe.columns:
+            works[col] = severe[col].to_numpy()
+        works["severe_rule_count"] = (
+            severe.sum(axis=1).astype("int16").to_numpy() if not severe.empty else 0
+        )
+        metrics["severe_rules"] = {
+            **{col: int(severe[col].sum()) for col in severe.columns},
+            "works_with_any": int((works["severe_rule_count"] > 0).sum()),
+            "works_with_two_or_more": int((works["severe_rule_count"] >= 2).sum()),
+        }
         metrics["rule_layer"] = {
             "positive_rate": float(works["rule_label"].mean()),
             "agreement_with_shipped_flags": agreement_with_shipped(works, rules, cfg),
@@ -380,12 +554,42 @@ def run(
         }
 
     with timer.stage("split works"):
-        splits = find_split_works(build_peer_groups(works, cfg), cfg)
+        split_peers_path = resolve(cfg["paths"]["models_dir"]) / "split_peers.joblib"
+        score_with_context = bool(
+            cfg["duplicates"]["split_works"].get("score_with_corpus_context", True)
+        )
+        if not train_models and score_with_context and split_peers_path.exists():
+            # Scoring run. Judge the batch against saved national peer medians,
+            # and look for groups across the batch AND the existing works in the
+            # same districts, so that a split lying partly in an upload, or
+            # wholly inside a small one, is still recognised.
+            import joblib
+
+            split_stats = joblib.load(split_peers_path)
+            context, batch_ids = _with_corpus_context(works, cfg)
+            splits = find_split_works(context, cfg, peer_stats=split_stats)
+            if not splits.empty:
+                touches = splits["work_ids"].map(
+                    lambda ids: bool(set(str(ids).split(",")) & batch_ids)
+                )
+                splits = splits.loc[touches].reset_index(drop=True)
+            split_source = (
+                f"saved peer stats, {len(context) - len(works):,} corpus works as context"
+            )
+        else:
+            peered = build_peer_groups(works, cfg)
+            splits = find_split_works(peered, cfg)
+            if train_models:
+                from ml.detect_duplicates import fit_split_peer_stats
+
+                models["split_peers"] = fit_split_peer_stats(peered, cfg)
+            split_source = "fitted on this run"
         in_split = split_membership(works, splits)
         metrics["split_works"] = {
             "groups": int(len(splits)),
             "works": int((in_split > 0).sum()),
             "with_same_vendor": int(splits["same_vendor"].sum()) if not splits.empty else 0,
+            "peer_source": split_source,
         }
 
     delay_risk = pd.Series(0.0, index=works.index, name="delay_risk")
@@ -466,18 +670,48 @@ def run(
         scored["delay_reasons"] = _as_json(delay_reasons)
 
         rollups = build_rollups(scored, cfg)
-        alerts = build_alerts(scored, dup.clusters, splits, cfg)
+        alerts = build_alerts(scored, dup.clusters, splits, cfg, dup_pairs=dup.pairs)
 
         from ml.risk import band_cutoffs
 
-        cuts = band_cutoffs(scored["risk_score"], cfg)
+        # Cut-offs from the BASE score, before the severe floor, so they match
+        # the cut-offs score() actually banded with.
+        base_scores = (
+            scored["base_risk_score"] if "base_risk_score" in scored else scored["risk_score"]
+        )
+        cuts = band_cutoffs(base_scores, cfg)
         metrics["band_cutoffs"] = {k: round(float(v), 2) for k, v in cuts.items()}
+        if "severe_floor_applied" in scored:
+            lifted = scored["severe_floor_applied"].astype(bool)
+            base_bands = pd.Series(
+                [band_for(v, cfg, cuts) for v in base_scores], index=scored.index
+            )
+            metrics["severe_floor"] = {
+                "works_lifted": int(lifted.sum()),
+                "works_changing_band": int((base_bands != scored["band"]).sum()),
+                "bands_before_floor": {
+                    b: int((base_bands == b).sum()) for b in ("Low", "Medium", "High", "Critical")
+                },
+            }
         if save and train_models:
             # Persist them: an upload must be banded against the national
             # distribution, not against its own handful of rows.
             cuts_path = resolve(cfg["paths"]["models_dir"]) / "band_cutoffs.json"
             cuts_path.parent.mkdir(parents=True, exist_ok=True)
             cuts_path.write_text(json.dumps(metrics["band_cutoffs"], indent=2), encoding="utf-8")
+
+            # And the data cut-off. Every age feature ("days since sanction",
+            # "still at Sanction stage after N days") counts to this date. Taken
+            # from an upload instead, "today" is the upload's own latest date:
+            # the 13 demo works put it at 2025-12-11 and a two-year-old stalled
+            # work read as 519 days old instead of 782.
+            from ml.features import cutoff_date
+
+            context_path = resolve(cfg["paths"]["models_dir"]) / "scoring_context.json"
+            context_path.write_text(
+                json.dumps({"cutoff_date": cutoff_date(works, cfg).date().isoformat()}, indent=2),
+                encoding="utf-8",
+            )
         metrics["band_method"] = str(cfg["risk"].get("band_method", "absolute"))
         band_counts = scored["band"].value_counts()
         metrics["risk_bands"] = {
@@ -550,7 +784,12 @@ def _save_outputs(
         for name, model in models.items():
             # The expected-cost entry is a bundle (model, SVD, residual stats),
             # not a bare estimator, so it gets its own filename.
-            filename = "expected_cost.joblib" if name == "expected_cost" else f"{name}_model.joblib"
+            bundles = {
+                "expected_cost": "expected_cost.joblib",
+                "cost_peers": "cost_peers.joblib",
+                "split_peers": "split_peers.joblib",
+            }
+            filename = bundles.get(name, f"{name}_model.joblib")
             joblib.dump(model, models_dir / filename)
 
 
@@ -565,6 +804,14 @@ def score_new_works(df: pd.DataFrame, cfg: dict[str, Any] | None = None) -> pd.D
     """
     cfg = cfg or load_config("ml")
     set_seed(int(cfg["seed"]))
+
+    # Count ages to the TRAINING data cut-off, not the upload's latest date.
+    context_path = resolve(cfg["paths"]["models_dir"]) / "scoring_context.json"
+    if not cfg.get("cutoff_date") and context_path.exists():
+        import copy
+
+        cfg = copy.deepcopy(cfg)
+        cfg["cutoff_date"] = json.loads(context_path.read_text(encoding="utf-8"))["cutoff_date"]
 
     data_cfg = load_config("data")
     prepared = clean(df, data_cfg) if "work_type" not in df.columns else df.copy()

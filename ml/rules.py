@@ -226,3 +226,45 @@ def agreement_with_shipped(
             "recomputed_positive": int(rules["rule_label"].sum()),
         }
     return out
+
+
+def severe_rules_fired(
+    df: pd.DataFrame, rules: pd.DataFrame, cfg: dict[str, Any] | None = None
+) -> pd.DataFrame:
+    """One boolean column per SEVERE rule, with each rule's extra conditions applied.
+
+    A severe rule is evidence direct enough that one firing should raise an
+    alert by itself. Some carry extra conditions: fast completion only counts
+    when it was within ``max_duration_days`` and the money had already gone
+    out, because finishing fast is alarming only when it was also paid for.
+    """
+    cfg = cfg or load_config("ml")
+    severe: dict[str, dict[str, Any]] = cfg["rules"].get("severe", {}) or {}
+
+    amount = pd.to_numeric(df["sanction_amount"], errors="coerce").astype("float64")
+    disbursed = pd.to_numeric(df.get("total_fund_disbursed"), errors="coerce").astype("float64")
+    ratio = (disbursed / amount.replace(0, np.nan)).fillna(0.0)
+    duration = pd.to_numeric(df.get("duration_days"), errors="coerce").astype("float64")
+
+    out = pd.DataFrame(index=df.index)
+    for column, conditions in severe.items():
+        if column not in rules.columns:
+            continue
+        conditions = conditions or {}
+        fired = rules[column].astype(bool)
+        if "min_disbursed_ratio" in conditions:
+            fired &= ratio >= float(conditions["min_disbursed_ratio"])
+        if "max_duration_days" in conditions:
+            fired &= (duration <= float(conditions["max_duration_days"])).fillna(False)
+        out[f"severe_{column.removeprefix('rule_')}"] = fired.astype(bool)
+    return out
+
+
+def severe_count(
+    df: pd.DataFrame, rules: pd.DataFrame, cfg: dict[str, Any] | None = None
+) -> pd.Series:
+    """How many severe rules fired for each work."""
+    fired = severe_rules_fired(df, rules, cfg)
+    if fired.empty:
+        return pd.Series(0, index=df.index, dtype="int16", name="severe_rule_count")
+    return fired.sum(axis=1).astype("int16").rename("severe_rule_count")

@@ -141,9 +141,44 @@ duplicates:
     en: "One of {n_works} near-identical works in this constituency totalling {total_amount}"
     hi: "इस निर्वाचन क्षेत्र में {n_works} लगभग समान कार्यों में से एक, कुल {total_amount}"
 split:
+  # Vendor is missing for about 20% of works, so a split group does not require
+  # a shared vendor. The wording only claims one when there is one.
   member:
-    en: "Part of {n_works} works to the same vendor within {window} days, together {total_amount} (above the {percentile}th percentile for {work_type}) while each is individually below the median"
-    hi: "एक ही विक्रेता को {window} दिनों के भीतर दिए गए {n_works} कार्यों में से एक, कुल {total_amount} ({work_type} के लिए {percentile}वें प्रतिशतक से अधिक) जबकि प्रत्येक अलग-अलग मध्यमान से कम है"
+    en: "Possible split work: one of {n_works} {work_type} works in this district sanctioned within {span_days:.0f} days, together {total_amount} (above the {percentile}th percentile) while each is individually below the median"
+    hi: "संभावित विभाजित कार्य: इस जिले में {span_days:.0f} दिनों के भीतर स्वीकृत {n_works} {work_type} कार्यों में से एक, कुल {total_amount} ({percentile}वें प्रतिशतक से अधिक) जबकि प्रत्येक अलग-अलग मध्यमान से कम है"
+  member_same_vendor:
+    en: "Possible split work: one of {n_works} {work_type} works to the same vendor within {span_days:.0f} days, together {total_amount} (above the {percentile}th percentile) while each is individually below the median"
+    hi: "संभावित विभाजित कार्य: एक ही विक्रेता को {span_days:.0f} दिनों के भीतर दिए गए {n_works} {work_type} कार्यों में से एक, कुल {total_amount} ({percentile}वें प्रतिशतक से अधिक) जबकि प्रत्येक अलग-अलग मध्यमान से कम है"
+  # Pieces of a split usually share near-identical descriptions. That similarity
+  # supports the split finding; it is not reported as a separate duplicate.
+  supporting_duplicate:
+    en: "Supporting evidence: description is {similarity:.0%} similar to {other_id} in the same group"
+    hi: "सहायक साक्ष्य: विवरण इसी समूह के {other_id} से {similarity:.0%} समान है"
+
+# --- Severe rules ----------------------------------------------------------
+# Evidence direct enough that one alone puts a work in the review queue.
+# Placeholders: {duration_days}, {days_since_sanction}, {work_status}, {work_type}
+severe:
+  severe_fast_completion:
+    en: "Sanctioned, marked complete and fully paid within {duration_days:.0f} day(s)"
+    hi: "{duration_days:.0f} दिन के भीतर स्वीकृत, पूर्ण दर्ज और पूरा भुगतान"
+  severe_stuck_work:
+    en: "Still at the '{work_status}' stage {days_since_sanction:.0f} days after sanction"
+    hi: "स्वीकृति के {days_since_sanction:.0f} दिन बाद भी '{work_status}' चरण पर है"
+  severe_payment_stuck:
+    en: "Payment has been in progress for over 60 days without completing"
+    hi: "भुगतान 60 दिनों से अधिक समय से प्रक्रियाधीन है और पूरा नहीं हुआ"
+
+# --- Cost channels -----------------------------------------------------------
+# The reason names WHICH channel fired, so a reviewer knows what the price was
+# compared against. Placeholders: {ratio}, {peer}, {expected}, {amount}
+cost:
+  state_peer:
+    en: "Cost is {ratio:.1f}x the median for {peer}"
+    hi: "लागत {peer} के मध्यमान से {ratio:.1f} गुना है"
+  expected:
+    en: "Cost is {ratio:.1f}x the cost predicted from this description ({amount} against about {expected})"
+    hi: "लागत इस विवरण से अनुमानित लागत की {ratio:.1f} गुना है ({amount} बनाम लगभग {expected})"
 
 # --- Delay layer -----------------------------------------------------------
 delay:

@@ -784,12 +784,29 @@ def _results_table(result: pd.DataFrame) -> None:
                 st.markdown(f"- {text}")
 
 
-_DEMO_MISSES = (
-    "Two of these are honest misses, kept in rather than tuned away. The mildly overpriced "
-    "solar light is not flagged: at Rs 52,360 it is ordinary for a solar light nationally, "
-    "even though it is 2.5x the Uttar Pradesh median. The fast completion trips its rule, but "
-    "one rule alone cannot reach the High cut-off."
-)
+def _expected_bands(expected: str) -> set[str]:
+    """Parse "Medium or High (cost)" into {"Medium", "High"}."""
+    head = str(expected).split("(")[0]
+    return {band for band in BAND_ORDER if band in head}
+
+
+def _demo_verdict(compare: pd.DataFrame) -> str:
+    """Say how many demo works landed where intended, naming the misses.
+
+    Computed from the scores on every run, so it can never describe an older
+    version of the model than the one on screen.
+    """
+    hits = compare.apply(lambda r: r["band"] in _expected_bands(r["expected"]), axis=1)
+    misses = compare.loc[~hits]
+    text = f"{int(hits.sum())} of {len(compare)} demo works land in the band they were built for."
+    if not misses.empty:
+        listed = "; ".join(
+            f"{row['what_it_is']} scored {row['risk_score']:.0f} ({row['band']}), "
+            f"built for {row['expected'].split('(')[0].strip()}"
+            for _, row in misses.iterrows()
+        )
+        text += f" Misses, kept in rather than tuned away: {listed}."
+    return text
 
 
 def page_live_scoring(scored: pd.DataFrame) -> None:
@@ -842,7 +859,7 @@ def page_live_scoring(scored: pd.DataFrame) -> None:
                     ),
                 },
             )
-            st.info(_DEMO_MISSES)
+            st.info(_demo_verdict(compare))
             _results_table(result)
 
     with tab_holdout:

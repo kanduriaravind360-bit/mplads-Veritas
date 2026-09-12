@@ -157,3 +157,22 @@ memorising districts.
 Three fixes fell out of building this: uploads were banding against percentiles
 of their own batch, the expected-cost model was being refit per upload rather
 than reused, and `score_new_works` rebuilt features from the wrong frame.
+
+**Step 3a — severe-rule floor, state-relative cost, split routing.** One severe
+rule (completed and fully paid within a day, stalled at an early stage for 612+
+days, or payment stuck) now lifts a work to at least the High cut-off, two to
+Critical. That lifts 2,539 works; High plus Critical goes from 5.0% to 8.4% of
+the 73,422 training works, above the ~7% expected, because stalled works add
+1,437. The per-detector injection recall and the holdout delay AUCs are
+unchanged; global rank recall falls (split groups 21.6% to 12.2%), which is the
+arithmetic of lifting 2,539 works above planted cases.
+
+The state-relative cost channel was built, measured and **kept out of the
+score**: driving the cost signal with it cut cost recall in its own queue from
+78.7% to 61.3%, and a non-saturating mapping still only reached 60.7%. It
+remains as descriptive data (`state_cost_ratio`) for the peer-comparison view.
+Uploads now look up saved peer statistics and search for split groups across the
+upload plus existing works in the same district, so the four demo road pieces
+are named a split work, with their 98% description similarity kept as supporting
+evidence. Uploads also count ages to the national data cut-off rather than the
+upload's own latest date.

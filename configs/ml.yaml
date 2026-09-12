@@ -228,6 +228,40 @@ expected_cost:
     tree_method: hist
 
 # ---------------------------------------------------------------------------
+# State-relative cost channel (ml/cost_peers.py)
+#
+# The expected-cost model is trained nationally, so a price that is ordinary in
+# one state can pass when it is extreme in another. Measured on the demo solar
+# light: 2.5x the Uttar Pradesh median, predicted Rs 53,451, actual Rs 52,360,
+# residual zero. This channel compares a work with the SAME type in the SAME
+# state; the final cost signal is the stronger of the two channels.
+#
+# Peer levels, first with at least min_peers works wins:
+#   work_type x state -> work_type x cost-index band -> work_type nationally
+# A state's cost index is its median log price relative to national, per work
+# type; states are cut into index_bands equal-count bands.
+#
+# Fitted on training works only and saved; uploads look it up, never refit.
+# ---------------------------------------------------------------------------
+cost_state:
+  min_peers: 30
+  index_bands: 3
+  min_mad_log: 0.15        # same floor as the expected-cost residual
+  signal_z_start: 1.5      # same mapping as the expected-cost channel
+  # Both cost channels map z through ml.cost_peers.soft_signal: 0 below
+  # signal_z_start, 0.9 at signal_z_full, approaching but never reaching 1.
+  signal_z_full: 4.0
+  # OFF: measured, the state channel lowers cost detection. Driving the cost
+  # signal with max(expected, state) and re-running the same injection test:
+  #   cost recall in its own queue, top 5%:  78.7% -> 61.3%  (top 10%: 94.7 -> 84.7)
+  # It adds about 4,100 works with a cost signal, 12,717 in total, and those
+  # real works genuinely outrank planted 3-5x overcharges. A non-saturating
+  # mapping removed the ties at 1.0 (3,325 -> 386) and still scored 60.7% and
+  # 86.0%, so the loss is real, not a tie artefact. The comparison is kept as
+  # descriptive data (state_peer_median, state_cost_ratio) for reviewers.
+  drive_cost_signal: false
+
+# ---------------------------------------------------------------------------
 # Transparent rule layer, recomputed from observable data (ml/rules.py)
 #
 # The dataset ships flag_* already computed, but those cannot respond to changed
@@ -276,6 +310,38 @@ rules:
     - rule_stuck_work
     - rule_vendor_concentration
   critical_rule_signal: 0.85
+
+  # SEVERE rules: evidence direct enough that one firing must raise an alert by
+  # itself. The fusion is built so no single WEAK signal reaches High, which is
+  # right for a statistical hint and wrong for a work sanctioned, completed and
+  # fully paid within a day. Before this floor such a work scored 61 and banded
+  # Low.
+  #
+  # Round amount is deliberately absent (fires on 36% of works). Cost outlier is
+  # absent because the cost channel already scores it on a continuous scale.
+  #
+  # Sized on the training corpus before choosing (73,422 works):
+  #   fast completion, any duration, fully paid   2,777  (3.8%)
+  #   fast completion <= 3 days, fully paid       2,142  (2.9%)
+  #   fast completion <= 1 day,  fully paid       1,558  (2.1%)   <- chosen
+  #   stalled in an early stage (>= 612 days)     1,437  (2.0%)
+  #   payment in progress and stale (>= 60 days)    232  (0.3%)
+  severe:
+    rule_fast_completion:
+      max_duration_days: 1
+      min_disbursed_ratio: 0.99
+    rule_stuck_work: {}
+    rule_payment_stuck: {}
+  # Floors are named by band boundary. A work below the floor is lifted into the
+  # bottom slice of that band, floor_headroom of the band's width, and its
+  # original score orders it within that slice. So floored works are not all
+  # tied at one value, and they stay below most works that earned the band on
+  # their own, though they can outrank a natural member sitting in the same
+  # bottom slice. Works already above the floor are untouched.
+  severe_floor:
+    one_rule: high
+    two_or_more: critical
+    floor_headroom: 0.25
 
 # ---------------------------------------------------------------------------
 # Unsupervised anomaly detection
@@ -391,6 +457,11 @@ duplicates:
     # groups: where p90 is 10x the median, four pieces cannot both sit below the
     # median and sum past p90. Measured, that cost 8 of 37 planted groups.
     combined_median_multiple: 2.5
+    # When scoring an upload: judge pieces against SAVED national peer medians
+    # and search for groups across the upload plus existing works in the same
+    # districts. Computed from the upload alone, a 13-row batch has no meaningful
+    # median, and four split road pieces were reported as duplicates instead.
+    score_with_corpus_context: true
     # Vendor identity is a BONUS, not a requirement. Vendor is missing for ~20%
     # of works, and demanding a match discarded most genuine groups: only 12% of
     # planted split groups were detected.
