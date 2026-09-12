@@ -60,6 +60,78 @@ def apply_rules(descriptions: pd.Series, cfg: dict[str, Any] | None = None) -> p
 SEPARATOR = bytes([0])
 
 
+#: One loaded model per process. Streamlit re-runs the whole script on every
+#: interaction, so without this the transformer is rebuilt on each click, which
+#: is both slow and the situation where the meta-tensor failure shows up.
+_MODEL: Any = None
+
+
+class EmbeddingModelUnavailableError(RuntimeError):
+    """The sentence transformer could not be loaded on this machine."""
+
+
+def load_model(cfg: dict[str, Any] | None = None) -> Any:
+    """Load the sentence transformer once, working around the meta-tensor bug.
+
+    Recent transformers versions load with ``low_cpu_mem_usage=True`` when
+    accelerate is installed. That builds the weights as meta tensors, which have
+    no storage, and moving them to CUDA then fails with::
+
+        NotImplementedError: Cannot copy out of meta tensor; no data!
+
+    Three strategies are tried in order, and the first that works is kept:
+
+    1. ask for ``low_cpu_mem_usage=False`` so real tensors are allocated;
+    2. load on CPU and move to the device afterwards, which sidesteps the
+       meta-tensor path entirely;
+    3. load plainly, for versions that accept neither.
+
+    Raises :class:`EmbeddingModelUnavailableError` if all of them fail, so callers
+    can fall back rather than crash the page.
+    """
+    global _MODEL
+    if _MODEL is not None:
+        return _MODEL
+
+    cfg = cfg or load_config("ml")
+    ecfg = cfg["embeddings"]
+    name = ecfg["model_name"]
+    device = torch_device()
+    failures: list[str] = []
+
+    from sentence_transformers import SentenceTransformer
+
+    def _attempt(label: str, build: Any) -> Any | None:
+        try:
+            return build()
+        except (NotImplementedError, TypeError, ValueError, RuntimeError, OSError) as error:
+            failures.append(f"{label}: {type(error).__name__}: {error}")
+            return None
+
+    model = _attempt(
+        "low_cpu_mem_usage=False",
+        lambda: SentenceTransformer(name, device=device, model_kwargs={"low_cpu_mem_usage": False}),
+    )
+    if model is None:
+        # Loading on CPU never creates a meta tensor, so the move is safe.
+        def _cpu_then_move() -> Any:
+            built = SentenceTransformer(name, device="cpu")
+            return built.to(device) if device != "cpu" else built
+
+        model = _attempt("cpu then move", _cpu_then_move)
+    if model is None:
+        model = _attempt("plain", lambda: SentenceTransformer(name, device=device))
+
+    if model is None:
+        raise EmbeddingModelUnavailableError(
+            "could not load the sentence transformer. Tried: " + " | ".join(failures)
+        )
+
+    model.max_seq_length = int(ecfg["max_seq_length"])
+    _MODEL = model
+    return model
+
+
 def _corpus_digest(descriptions: pd.Series) -> str:
     """Short stable hash of a description corpus, used to key the cache."""
     hasher = hashlib.blake2b(digest_size=8)
@@ -70,11 +142,35 @@ def _corpus_digest(descriptions: pd.Series) -> str:
     return hasher.hexdigest()
 
 
+def tfidf_embeddings(descriptions: pd.Series, cfg: dict[str, Any] | None = None) -> np.ndarray:
+    """Cheap stand-in for the sentence transformer, when it cannot be loaded.
+
+    Character n-gram TF-IDF reduced by SVD. It is markedly worse at matching a
+    reworded duplicate than the multilingual model, because it sees spelling
+    rather than meaning, but it keeps the page working instead of crashing and
+    it needs nothing but scikit-learn.
+    """
+    cfg = cfg or load_config("ml")
+    from sklearn.decomposition import TruncatedSVD
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    texts = descriptions.fillna("").astype(str).tolist()
+    width = min(int(cfg["expected_cost"]["svd_components"]), max(2, len(texts) - 1))
+
+    matrix = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5), min_df=1).fit_transform(texts)
+    width = min(width, matrix.shape[1] - 1) if matrix.shape[1] > 2 else 2
+    reduced = TruncatedSVD(n_components=width, random_state=int(cfg["seed"])).fit_transform(matrix)
+
+    norms = np.linalg.norm(reduced, axis=1, keepdims=True)
+    return (reduced / np.where(norms == 0, 1.0, norms)).astype("float32")
+
+
 def embed_descriptions(
     descriptions: pd.Series,
     cfg: dict[str, Any] | None = None,
     cache_path: Path | str | None = None,
     use_cache: bool = True,
+    allow_model: bool = True,
 ) -> np.ndarray:
     """Embed descriptions with a multilingual sentence transformer on the GPU.
 
@@ -97,12 +193,12 @@ def embed_descriptions(
         if cached.shape[0] == len(descriptions):
             return cached
 
-    from sentence_transformers import SentenceTransformer
+    if not allow_model:
+        raise EmbeddingModelUnavailableError(
+            "no cached embeddings for this corpus and the model was not permitted"
+        )
 
-    device = torch_device()
-    model = SentenceTransformer(ecfg["model_name"], device=device)
-    model.max_seq_length = int(ecfg["max_seq_length"])
-
+    model = load_model(cfg)
     vectors = model.encode(
         descriptions.fillna("").astype(str).tolist(),
         batch_size=int(ecfg["batch_size"]),
@@ -115,6 +211,18 @@ def embed_descriptions(
         path.parent.mkdir(parents=True, exist_ok=True)
         np.save(path, vectors)
     return vectors
+
+
+def embedding_cache_path(descriptions: pd.Series, cfg: dict[str, Any] | None = None) -> Path:
+    """Where the cached embeddings for this exact corpus live."""
+    cfg = cfg or load_config("ml")
+    base = resolve(cfg["paths"]["embeddings"])
+    return base.with_name(f"{base.stem}-{_corpus_digest(descriptions)}{base.suffix}")
+
+
+def has_cached_embeddings(descriptions: pd.Series, cfg: dict[str, Any] | None = None) -> bool:
+    """True when this corpus can be embedded without touching the model."""
+    return embedding_cache_path(descriptions, cfg).exists()
 
 
 def _name_clusters(texts: list[str], labels: np.ndarray, cfg: dict[str, Any]) -> dict[int, str]:

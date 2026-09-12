@@ -23,7 +23,13 @@ dependencies = [
     "lightgbm==4.5.0",
     "shap==0.46.0",
     "pyod==2.0.5",
+    # Verified working together on this machine. The Live Scoring page crashed
+    # with "Cannot copy out of meta tensor" when transformers loaded the model
+    # with low_cpu_mem_usage=True, which it does only when accelerate is
+    # installed. accelerate is therefore deliberately NOT a dependency, and
+    # ml.work_type.load_model defends against it anyway.
     "sentence-transformers==3.4.1",
+    "transformers==4.57.6",
     # transitive, pinned: the current regex release is blocked by Smart App Control
     "regex==2024.11.6",
     # text / graph / utils

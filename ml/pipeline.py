@@ -79,6 +79,68 @@ def load_works(cfg: dict[str, Any]) -> pd.DataFrame:
     return clean(load_raw(data_cfg), data_cfg)
 
 
+def _embed_or_fall_back(descriptions: pd.Series, cfg: dict[str, Any]) -> tuple[np.ndarray, str]:
+    """Embed descriptions, degrading rather than crashing.
+
+    Order: a cached corpus (no model needed at all), then the sentence
+    transformer, then character TF-IDF. The last is a real downgrade at matching
+    reworded duplicates, but a working page beats a stack trace in front of an
+    audience, and the caller is told which one was used so it can say so.
+    """
+    from ml.work_type import (
+        EmbeddingModelUnavailableError,
+        has_cached_embeddings,
+        tfidf_embeddings,
+    )
+
+    if has_cached_embeddings(descriptions, cfg):
+        return embed_descriptions(descriptions, cfg), "cache"
+    try:
+        return embed_descriptions(descriptions, cfg), "sentence-transformer"
+    except EmbeddingModelUnavailableError as error:
+        print(f"  embedding model unavailable ({error}); using TF-IDF instead", flush=True)
+        return tfidf_embeddings(descriptions, cfg), "tfidf-fallback"
+    except Exception as error:  # noqa: BLE001 - never let this crash a demo
+        print(f"  embedding failed ({type(error).__name__}: {error}); using TF-IDF", flush=True)
+        return tfidf_embeddings(descriptions, cfg), "tfidf-fallback"
+
+
+def precompute_demo_embeddings(cfg: dict[str, Any] | None = None) -> dict[str, str]:
+    """Warm the embedding cache for the two Live Scoring buttons.
+
+    Both buttons score a fixed corpus, so their embeddings can be computed once
+    here and read from disk forever after. That takes the sentence transformer
+    out of the demo path entirely: the buttons cannot fail on a model-loading
+    problem, because they never load a model.
+    """
+    cfg = cfg or load_config("ml")
+    from ml.data import clean as clean_frame
+    from ml.work_type import embed_descriptions
+
+    out: dict[str, str] = {}
+    data_cfg = load_config("data")
+
+    demo_csv = resolve("demo_data/live_demo_works.csv")
+    if demo_csv.exists():
+        demo = pd.read_csv(demo_csv).drop(columns=["demo_key", "expected_outcome"], errors="ignore")
+        prepared = clean_frame(demo, data_cfg)
+        embed_descriptions(prepared["work_description"], cfg)
+        out["demo_works"] = f"{len(prepared)} rows"
+
+    holdout_path = resolve(cfg["paths"]["holdout_works"])
+    if holdout_path.exists():
+        holdout = pd.read_parquet(holdout_path)
+        embed_descriptions(holdout["work_description"], cfg)
+        out["holdout_all"] = f"{len(holdout)} rows"
+        # The button scores a fixed sample, which is a different corpus and so a
+        # different cache key.
+        sample = holdout.sample(n=min(100, len(holdout)), random_state=42).reset_index(drop=True)
+        embed_descriptions(sample["work_description"], cfg)
+        out["holdout_sample_100"] = f"{len(sample)} rows"
+
+    return out
+
+
 def build_alerts(
     scored: pd.DataFrame,
     duplicates: pd.DataFrame,
@@ -235,7 +297,8 @@ def run(
     embeddings: np.ndarray | None = None
     if use_embeddings:
         with timer.stage("embed descriptions (GPU)"):
-            embeddings = embed_descriptions(works["work_description"], cfg)
+            embeddings, embedding_source = _embed_or_fall_back(works["work_description"], cfg)
+            metrics["embedding_source"] = embedding_source
 
     with timer.stage("work type"):
         works["work_type"] = assign_work_type(

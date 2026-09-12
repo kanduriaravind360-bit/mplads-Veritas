@@ -138,6 +138,13 @@ def main(argv: list[str] | None = None) -> int:
             except FileNotFoundError as error:
                 print(f"  skipped: {error}")
 
+    from ml.pipeline import precompute_demo_embeddings
+
+    warmed = precompute_demo_embeddings(cfg)
+    if warmed:
+        print(f"\nembedding cache warmed for the demo buttons: {warmed}")
+        result.metrics["precomputed_embeddings"] = warmed
+
     path = write_metrics(result.metrics, injection, result.feature_names, cfg)
 
     counts = pd.DataFrame(result.metrics["work_type"]["counts"]).head(10)
