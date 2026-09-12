@@ -249,23 +249,23 @@
     "delay": 0.12
   },
   "timings_seconds": {
-    "load works": 0.13,
-    "embed descriptions (GPU)": 0.08,
-    "work type": 19.55,
-    "quantity + expected cost": 37.15,
-    "rule layer": 1.77,
-    "features": 0.69,
-    "unsupervised anomaly": 11.29,
-    "duplicates": 75.73,
-    "split works": 12.49,
-    "delay model": 4.84,
-    "supervised proxy model": 7.89,
+    "load works": 0.48,
+    "embed descriptions (GPU)": 0.3,
+    "work type": 77.17,
+    "quantity + expected cost": 83.56,
+    "rule layer": 11.29,
+    "features": 2.6,
+    "unsupervised anomaly": 12.6,
+    "duplicates": 75.05,
+    "split works": 12.67,
+    "delay model": 4.87,
+    "supervised proxy model": 7.86,
     "risk fusion": 0.04,
-    "reasons (EN + HI)": 6.76,
-    "assemble + roll up": 3.71,
-    "save outputs": 0.79
+    "reasons (EN + HI)": 6.72,
+    "assemble + roll up": 3.78,
+    "save outputs": 0.81
   },
-  "total_seconds": 183.14,
+  "total_seconds": 300.02,
   "feature_list": [
     "amount_vs_peer_median",
     "cost_pct_in_type",
@@ -315,6 +315,102 @@
     "critical": 85
   },
   "injection_test": {
+    "headline": "per_stream_recall",
+    "per_stream_recall": {
+      "inflated_cost": {
+        "n_injected": 150,
+        "queue_size": 9302,
+        "queue_share_of_all_works": 0.1194,
+        "recall_at_top_1pct": 0.0,
+        "precision_at_top_1pct": 0.0,
+        "n_reviewed_at_top_1pct": 779,
+        "recall_at_top_5pct": 0.7867,
+        "precision_at_top_5pct": 0.0303,
+        "n_reviewed_at_top_5pct": 3896,
+        "recall_at_top_10pct": 0.9467,
+        "precision_at_top_10pct": 0.0182,
+        "n_reviewed_at_top_10pct": 7791,
+        "detector_fired": 0.9667
+      },
+      "duplicate": {
+        "n_injected": 150,
+        "queue_size": 19220,
+        "queue_share_of_all_works": 0.2467,
+        "recall_at_top_1pct": 0.0,
+        "precision_at_top_1pct": 0.0,
+        "n_reviewed_at_top_1pct": 779,
+        "recall_at_top_5pct": 0.4533,
+        "precision_at_top_5pct": 0.0175,
+        "n_reviewed_at_top_5pct": 3896,
+        "recall_at_top_10pct": 0.5533,
+        "precision_at_top_10pct": 0.0107,
+        "n_reviewed_at_top_10pct": 7791,
+        "detector_fired": 0.7333
+      },
+      "fast_complete": {
+        "n_injected": 150,
+        "queue_size": 3527,
+        "queue_share_of_all_works": 0.0453,
+        "recall_at_top_1pct": 0.0667,
+        "precision_at_top_1pct": 0.0128,
+        "n_reviewed_at_top_1pct": 779,
+        "recall_at_top_5pct": 1.0,
+        "precision_at_top_5pct": 0.0425,
+        "n_reviewed_at_top_5pct": 3527,
+        "recall_at_top_10pct": 1.0,
+        "precision_at_top_10pct": 0.0425,
+        "n_reviewed_at_top_10pct": 3527,
+        "detector_fired": 1.0
+      },
+      "split_group": {
+        "n_injected": 148,
+        "queue_size": 7196,
+        "queue_share_of_all_works": 0.0924,
+        "recall_at_top_1pct": 0.0,
+        "precision_at_top_1pct": 0.0,
+        "n_reviewed_at_top_1pct": 779,
+        "recall_at_top_5pct": 0.0541,
+        "precision_at_top_5pct": 0.0021,
+        "n_reviewed_at_top_5pct": 3896,
+        "recall_at_top_10pct": 0.4595,
+        "precision_at_top_10pct": 0.0094,
+        "n_reviewed_at_top_10pct": 7196,
+        "detector_fired": 0.4595
+      }
+    },
+    "per_stream_note": "Recall and precision inside each detector's OWN ranked queue, which is what a reviewer opens. Precision counts only planted cases as hits, so a genuine anomaly ranked high scores as a miss: treat these as a floor, bounded above by the plant rate, not as real precision.",
+    "weakest_detector_plain_language": "The split-work detector is our weakest at 46% and is the main open item.",
+    "global_rank_recall": {
+      "duplicate": {
+        "n_injected": 150.0,
+        "recall_at_top_1pct": 0.0267,
+        "found_at_top_1pct": 4.0,
+        "recall_at_top_5pct": 0.1067,
+        "found_at_top_5pct": 16.0
+      },
+      "fast_complete": {
+        "n_injected": 150.0,
+        "recall_at_top_1pct": 0.0333,
+        "found_at_top_1pct": 5.0,
+        "recall_at_top_5pct": 0.8133,
+        "found_at_top_5pct": 122.0
+      },
+      "inflated_cost": {
+        "n_injected": 150.0,
+        "recall_at_top_1pct": 0.1667,
+        "found_at_top_1pct": 25.0,
+        "recall_at_top_5pct": 0.5333,
+        "found_at_top_5pct": 80.0
+      },
+      "split_group": {
+        "n_injected": 148.0,
+        "recall_at_top_1pct": 0.0,
+        "found_at_top_1pct": 0.0,
+        "recall_at_top_5pct": 0.2162,
+        "found_at_top_5pct": 32.0
+      }
+    },
+    "global_rank_recall_note": "MISLEADING as a headline: it ranks every work on one global list, but 9,239 real rows are exact in-constituency duplicates and 2,686 real works were completed inside 6 days with funds fully drawn. Those correctly outrank a reworded plant, and the global top 5% holds only 3,865 works, so a planted case can be found by its detector and still not appear. Kept for continuity with step 2.",
     "per_type": {
       "duplicate": {
         "n_injected": 150.0,

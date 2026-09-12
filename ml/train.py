@@ -103,7 +103,35 @@ def main(argv: list[str] | None = None) -> int:
             }
             for kind, vals in sorted(injection["per_type"].items())
         ]
-        _print_table("Injection test: rank-based recall", pd.DataFrame(rows))
+        stream = injection.get("per_stream_recall", {})
+        if stream:
+            _print_table(
+                "Per-detector queue (headline): recall / precision within each stream",
+                pd.DataFrame(
+                    [
+                        {
+                            "detector": k,
+                            "fired": f"{v.get('detector_fired', 0):.1%}",
+                            "queue": f"{v['queue_size']:,}",
+                            "rec@1%": f"{v['recall_at_top_1pct']:.1%}",
+                            "rec@5%": f"{v['recall_at_top_5pct']:.1%}",
+                            "rec@10%": f"{v['recall_at_top_10pct']:.1%}",
+                            "prec@5%": f"{v['precision_at_top_5pct']:.1%}",
+                        }
+                        for k, v in sorted(stream.items())
+                    ]
+                ),
+            )
+            weakest = injection.get("weakest_detector_plain_language")
+            if weakest:
+                print(f"\n{weakest}")
+            print(
+                "Precision counts only planted cases as hits, so a genuine anomaly "
+                "ranked\nhigh scores as a miss. Read it as a floor, not as real "
+                "precision."
+            )
+
+        _print_table("Global rank recall (misleading as a headline; see note)", pd.DataFrame(rows))
 
         comp = injection.get("recall_at_top_5pct_before_after", {})
         if comp:

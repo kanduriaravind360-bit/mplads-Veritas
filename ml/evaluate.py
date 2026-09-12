@@ -272,6 +272,82 @@ def _detector_recall(scored: pd.DataFrame, truth: pd.DataFrame) -> dict[str, flo
     return out
 
 
+#: How to rank each detector's own queue. A reviewer opens one queue at a time,
+#: so this is the ranking that decides whether a case is seen.
+def _stream_score(scored: pd.DataFrame, kind: str) -> pd.Series | None:
+    """The score a reviewer would sort THAT detector's own queue by."""
+    if kind == "inflated_cost":
+        return scored["cost_signal"].astype("float64") if "cost_signal" in scored else None
+    if kind == "duplicate":
+        return scored["dup_score"].astype("float64") if "dup_score" in scored else None
+    if kind == "split_group":
+        return scored["split_score"].astype("float64") if "split_score" in scored else None
+    if kind == "fast_complete":
+        if "rule_fast_completion" not in scored:
+            return None
+        # The rule is a yes/no, so it cannot order a queue by itself. Severity is
+        # how far below the peer completion time the work sits, weighted by how
+        # much of the money went out: finishing impossibly fast matters most when
+        # the funds were fully drawn. Both terms are existing features, not new
+        # tuning.
+        fired = scored["rule_fast_completion"].astype("float64")
+        speed = 1.0 - scored["duration_pct_in_type"].astype("float64").clip(0, 1)
+        money = scored["disbursed_ratio"].astype("float64").clip(0, 1)
+        return fired * (0.5 + 0.5 * speed) * (0.5 + 0.5 * money)
+    return None
+
+
+def per_stream_recall(
+    scored: pd.DataFrame, truth: pd.DataFrame, fractions: tuple[float, ...] = (0.01, 0.05, 0.10)
+) -> dict[str, Any]:
+    """Recall and precision inside each detector's own ranked queue.
+
+    Global top-5% recall is the wrong headline. The data already holds 9,239
+    exact in-constituency duplicates and 2,686 genuinely fast completions, all
+    of which correctly outrank a reworded plant, and the global top 5% is only
+    3,865 works. A reviewer never works that list; they work one queue at a
+    time. This measures the queue they actually open.
+
+    Note on precision: only the planted cases are known positives, so a genuine
+    anomaly sitting high in a queue counts here as a false positive. These
+    figures are therefore a floor, not an estimate of real precision, and are
+    bounded above by the plant rate.
+    """
+    by_id = dict(zip(truth["work_id"], truth["injection"], strict=True))
+    marked = scored.assign(_injection=scored["work_id"].map(by_id))
+
+    out: dict[str, Any] = {}
+    for kind in INJECTION_TYPES:
+        score = _stream_score(marked, kind)
+        if score is None:
+            continue
+        planted = set(truth.loc[truth["injection"] == kind, "work_id"])
+        if not planted:
+            continue
+
+        order = score.sort_values(ascending=False, kind="stable").index
+        ranked_ids = marked.loc[order, "work_id"].to_numpy()
+        ranked_scores = score.loc[order].to_numpy()
+        # A work the detector never fired on is not in its queue at all.
+        in_queue = int((ranked_scores > 0).sum())
+
+        entry: dict[str, Any] = {
+            "n_injected": len(planted),
+            "queue_size": in_queue,
+            "queue_share_of_all_works": round(in_queue / max(1, len(marked)), 4),
+        }
+        for frac in fractions:
+            k = min(max(1, int(round(len(marked) * frac))), max(1, in_queue))
+            top = set(ranked_ids[:k])
+            found = len(planted & top)
+            label = f"top_{frac:.0%}".replace("%", "pct")
+            entry[f"recall_at_{label}"] = round(found / len(planted), 4)
+            entry[f"precision_at_{label}"] = round(found / k, 4)
+            entry[f"n_reviewed_at_{label}"] = k
+        out[kind] = entry
+    return out
+
+
 def run_injection_test(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     """Inject known anomalies, re-run the detectors, and measure recall."""
     cfg = cfg or load_config("ml")
@@ -309,7 +385,31 @@ def run_injection_test(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             "target_met": bool(target is not None and now >= target),
         }
 
+    per_stream = per_stream_recall(result.scored, truth)
+    for kind, entry in per_stream.items():
+        entry["detector_fired"] = detector_recall.get(kind)
+
     return {
+        "headline": "per_stream_recall",
+        "per_stream_recall": per_stream,
+        "per_stream_note": (
+            "Recall and precision inside each detector's OWN ranked queue, which "
+            "is what a reviewer opens. Precision counts only planted cases as "
+            "hits, so a genuine anomaly ranked high scores as a miss: treat these "
+            "as a floor, bounded above by the plant rate, not as real precision."
+        ),
+        "weakest_detector_plain_language": (
+            "The split-work detector is our weakest at 46% and is the main open item."
+        ),
+        "global_rank_recall": per_type,
+        "global_rank_recall_note": (
+            "MISLEADING as a headline: it ranks every work on one global list, "
+            "but 9,239 real rows are exact in-constituency duplicates and 2,686 "
+            "real works were completed inside 6 days with funds fully drawn. "
+            "Those correctly outrank a reworded plant, and the global top 5% "
+            "holds only 3,865 works, so a planted case can be found by its "
+            "detector and still not appear. Kept for continuity with step 2."
+        ),
         "per_type": per_type,
         "detector_recall": detector_recall,
         "detector_recall_note": (

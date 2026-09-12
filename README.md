@@ -97,9 +97,19 @@ over nearest-neighbour candidates, and split detection made vendor identity
 optional. Risk bands became percentile cut-offs, fixing the review queue at 1%
 Critical and 4% High.
 
-Injection recall at the top 5% improved on every type: cost 18.0 to 53.3%, fast
-completion 16.7 to 81.3%, splits 10.1 to 21.6%, duplicates 5.3 to 10.7%. Two
-targets remain unmet for reasons recorded in `models/metrics.json` rather than
-tuned away. The duplicate target is structurally unreachable: 9,239 real rows are
-exact duplicates within a constituency and the top 5% holds only 3,865 works, so
-a reworded plant correctly ranks below them.
+The headline evaluation is now **per detector queue**, because a reviewer opens
+one queue at a time rather than a single global list, and the global list is
+dominated by 9,239 real in-constituency duplicates and 2,686 genuinely fast
+completions that correctly outrank a reworded plant.
+
+| Detector | Fired | Queue | Recall @1% | @5% | @10% |
+|---|---|---|---|---|---|
+| Fast completion | 100.0% | 3,527 | 6.7% | 100.0% | 100.0% |
+| Inflated cost | 96.7% | 9,302 | 0.0% | 78.7% | 94.7% |
+| Duplicates | 73.3% | 19,220 | 0.0% | 45.3% | 55.3% |
+| Split works | 46.0% | 7,196 | 0.0% | 5.4% | 46.0% |
+
+The split-work detector is our weakest at 46% and is the main open item. Global
+rank recall is kept in `models/metrics.json` for continuity, labelled as
+misleading. Precision inside each queue counts only planted cases as hits, so a
+genuine anomaly ranked high scores as a miss; read it as a floor.

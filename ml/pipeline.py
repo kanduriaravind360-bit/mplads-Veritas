@@ -342,6 +342,12 @@ def run(
         )
         scored = pd.concat([works, extra, signals, reasons_en, reasons_hi], axis=1)
         scored["in_split_group"] = in_split.to_numpy()
+        # Keep each detector's own score alongside the fused one. The fused
+        # "duplicate" channel is the maximum of the duplicate and split scores,
+        # which is right for scoring a work but useless for judging either
+        # detector on its own.
+        scored["dup_score"] = dup.dup_score.to_numpy()
+        scored["split_score"] = in_split.to_numpy()
         # The per-detector attributions are (feature, value) tuples. Parquet
         # cannot infer a type for those, so they are stored as JSON strings,
         # which is also what the backend will hand to the dashboard.

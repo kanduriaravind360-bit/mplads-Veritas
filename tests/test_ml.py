@@ -415,3 +415,49 @@ def test_band_cutoffs_follow_configured_percentiles(scored, cfg: dict) -> None:
     pcts = cfg["risk"]["band_percentiles"]
     share = (frame["band"] == "Critical").mean()
     assert share == pytest.approx(1.0 - float(pcts["critical"]), abs=0.02)
+
+
+# --- per-stream evaluation -------------------------------------------------
+
+
+def test_per_stream_recall_ranks_within_each_detector(sample: pd.DataFrame, cfg: dict) -> None:
+    """Each detector must be judged on its own queue, not the global list."""
+    from ml.evaluate import INJECTION_TYPES, per_stream_recall
+
+    scored = pd.DataFrame(
+        {
+            "work_id": [f"W{i:03d}" for i in range(100)],
+            "cost_signal": np.linspace(0, 1, 100),
+            "dup_score": np.linspace(0, 1, 100),
+            "split_score": np.linspace(0, 1, 100),
+            "rule_fast_completion": [True] * 100,
+            "duration_pct_in_type": np.linspace(0, 1, 100),
+            "disbursed_ratio": np.linspace(0, 1, 100),
+        }
+    )
+    # Plant the highest-scoring works so a correct implementation finds them.
+    truth = pd.DataFrame(
+        [{"work_id": "W099", "injection": kind, "group": "g"} for kind in INJECTION_TYPES]
+    )
+
+    out = per_stream_recall(scored, truth, fractions=(0.10,))
+    assert set(out) <= set(INJECTION_TYPES)
+    for kind, entry in out.items():
+        assert entry["queue_size"] > 0, f"{kind} queue is empty"
+        assert 0.0 <= entry["recall_at_top_10pct"] <= 1.0
+        assert 0.0 <= entry["precision_at_top_10pct"] <= 1.0
+
+    # W099 tops the cost, duplicate and split queues, so each must recall it.
+    for kind in ("inflated_cost", "duplicate", "split_group"):
+        assert out[kind]["recall_at_top_10pct"] == 1.0, f"{kind} missed its top-ranked plant"
+
+
+def test_per_stream_needs_each_detector_score_column(scored) -> None:
+    """The pipeline must expose each detector's own score, not just the fused one.
+
+    The fused ``duplicate`` channel is the maximum of the duplicate and split
+    scores, so judging either detector from it is impossible.
+    """
+    frame = scored.scored
+    for column in ("cost_signal", "dup_score", "split_score"):
+        assert column in frame.columns, f"{column} missing from the scored output"
