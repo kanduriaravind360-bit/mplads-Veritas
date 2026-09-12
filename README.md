@@ -63,7 +63,7 @@ ruff check . && pytest
 **Step 1 — setup + data loading.** Python 3.12.10 environment on `uv` with the
 full data/ML/API stack pinned and import-verified (29/29 modules). PyTorch
 2.9.0+cu128 runs on the RTX 5060 Laptop GPU (`sm_120`, 8.55 GB, 3.6 TFLOP/s fp32
-on a 4096² matmul); XGBoost trains with `device="cuda"`. Private GitHub repo
+on a 4096² matmul); XGBoost trains with `device="cuda"`. GitHub repo
 created and pushed.
 
 `ml/data.py` loads the `Data` sheet, parses the four date columns, coerces
