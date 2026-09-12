@@ -24,8 +24,24 @@ paths:
   rollup_mp: data/processed/rollup_mp.parquet
   rollup_vendor: data/processed/rollup_vendor.parquet
   models_dir: models
+  holdout_works: data/processed/holdout_works.parquet
   metrics: models/metrics.json
   feature_list: models/feature_list.json
+
+# ---------------------------------------------------------------------------
+# Holdout, reserved BEFORE anything is fitted (ml/holdout.py)
+#
+# Split by whole constituency, not by row. A row split would leave a held-out
+# work's neighbours in training, and vendor concentration and district history
+# are computed within an area, so the model would effectively have seen it.
+#
+# Held-out works are excluded from every fitted model AND from every peer,
+# vendor, district and constituency statistic.
+# ---------------------------------------------------------------------------
+holdout:
+  enabled: true
+  fraction: 0.05
+  constituencies_file: configs/holdout.yaml
 
 # ---------------------------------------------------------------------------
 # Sentence embeddings (GPU)

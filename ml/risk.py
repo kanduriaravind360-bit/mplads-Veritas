@@ -381,8 +381,14 @@ def score(
     in_split: pd.Series,
     delay_risk: pd.Series,
     cfg: dict[str, Any] | None = None,
+    cuts: dict[str, float] | None = None,
 ) -> pd.DataFrame:
-    """Assemble the signal table, fuse it, and band the result."""
+    """Assemble the signal table, fuse it, and band the result.
+
+    ``cuts`` supplies the band boundaries. Pass the TRAINING cut-offs when
+    scoring an upload: percentiles of a 13-row batch put one work in Critical
+    whatever it scores, which is nonsense.
+    """
     cfg = cfg or load_config("ml")
 
     duplicate = pd.concat([dup_score.astype("float64"), _split_signal(in_split)], axis=1).max(
@@ -411,7 +417,8 @@ def score(
         index=df.index,
     )
     risk = fuse(signals, is_open, cfg)
-    cuts = band_cutoffs(risk, cfg)
+    if cuts is None:
+        cuts = band_cutoffs(risk, cfg)
 
     out = signals.copy()
     out["risk_score"] = risk.round(2)

@@ -6,144 +6,164 @@
     "torch": "cuda",
     "name": "NVIDIA GeForce RTX 5060 Laptop GPU"
   },
+  "holdout": {
+    "n_train": 73422,
+    "n_holdout": 3890,
+    "holdout_share_of_works": 0.0503,
+    "n_holdout_constituencies": 27,
+    "no_shared_work_id": true,
+    "no_shared_constituency": true,
+    "split_unit": "whole constituency",
+    "why_constituency": "Splitting by row would leave a held-out work's neighbours in training, and vendor concentration and district history are computed within an area, so the model would effectively have seen it.",
+    "constituencies_file": "configs/holdout.yaml",
+    "excluded_from": [
+      "expected-cost model",
+      "delay model",
+      "proxy-label model",
+      "isolation forest and ECOD",
+      "peer group medians and MADs",
+      "vendor, district and constituency statistics",
+      "duplicate and split-work candidate generation"
+    ]
+  },
   "work_type": {
     "n_types": 56,
     "counts": [
       {
         "work_type": "High Mast / LED Light",
-        "works": 10026,
-        "share_pct": 12.97
+        "works": 9733,
+        "share_pct": 13.26
       },
       {
         "work_type": "CC / Concrete Road",
-        "works": 7039,
-        "share_pct": 9.1
+        "works": 6763,
+        "share_pct": 9.21
       },
       {
         "work_type": "Solar Light",
-        "works": 6148,
-        "share_pct": 7.95
+        "works": 5931,
+        "share_pct": 8.08
       },
       {
         "work_type": "Road / Pavement",
-        "works": 5211,
-        "share_pct": 6.74
+        "works": 4923,
+        "share_pct": 6.71
       },
       {
         "work_type": "Community Hall / Bhavan",
-        "works": 4477,
-        "share_pct": 5.79
+        "works": 4266,
+        "share_pct": 5.81
       },
       {
         "work_type": "Paver Block / Interlocking",
-        "works": 2991,
+        "works": 2841,
         "share_pct": 3.87
       },
       {
         "work_type": "Drain / Nala",
-        "works": 2820,
-        "share_pct": 3.65
-      },
-      {
-        "work_type": "Sports / Gym / Playground",
-        "works": 2656,
-        "share_pct": 3.44
+        "works": 2734,
+        "share_pct": 3.72
       },
       {
         "work_type": "Hand Pump / Borewell",
-        "works": 2567,
-        "share_pct": 3.32
+        "works": 2546,
+        "share_pct": 3.47
+      },
+      {
+        "work_type": "Sports / Gym / Playground",
+        "works": 2196,
+        "share_pct": 2.99
       },
       {
         "work_type": "Water Tank / Tanker / RO Plant",
-        "works": 2481,
-        "share_pct": 3.21
+        "works": 2183,
+        "share_pct": 2.97
       },
       {
         "work_type": "Crematorium / Burial Ground",
-        "works": 1840,
-        "share_pct": 2.38
+        "works": 1770,
+        "share_pct": 2.41
       },
       {
         "work_type": "Community Shed / Platform",
-        "works": 1768,
+        "works": 1728,
+        "share_pct": 2.35
+      },
+      {
+        "work_type": "Other: construction village panchayat",
+        "works": 1682,
         "share_pct": 2.29
       },
       {
         "work_type": "Library / Books",
-        "works": 1623,
-        "share_pct": 2.1
-      },
-      {
-        "work_type": "Other: construction village work",
-        "works": 1578,
-        "share_pct": 2.04
+        "works": 1465,
+        "share_pct": 2.0
       },
       {
         "work_type": "Computer / Smart Class",
-        "works": 1417,
-        "share_pct": 1.83
+        "works": 1279,
+        "share_pct": 1.74
       }
     ]
   },
   "quantity_extraction": {
-    "rows": 77312,
-    "with_quantity": 9951,
-    "coverage_pct": 12.87,
+    "rows": 73422,
+    "with_quantity": 9323,
+    "coverage_pct": 12.7,
     "by_unit": {
-      "length_m": 4258,
-      "count": 3653,
-      "volume_l": 1105,
-      "power_w": 681,
-      "power_hp": 156,
-      "bore_mm": 73,
+      "length_m": 4111,
+      "count": 3401,
+      "volume_l": 889,
+      "power_w": 676,
+      "power_hp": 154,
+      "bore_mm": 67,
       "area_sqm": 25
     }
   },
   "expected_cost_model": {
-    "n_rows": 77312,
+    "n_rows": 73422,
     "n_splits": 5,
     "device": "cuda",
     "svd_components": 50,
-    "mae_log_rupees": 0.3399,
-    "mae_as_cost_ratio": 1.405,
-    "residual_std": 0.5181,
-    "residual_mad": 0.2079,
-    "r2": 0.7676,
+    "mae_log_rupees": 0.3386,
+    "mae_as_cost_ratio": 1.403,
+    "residual_std": 0.5172,
+    "residual_mad": 0.206,
+    "r2": 0.7707,
     "note": "Out-of-fold predictions: every work is priced by a model that never saw it. mae_as_cost_ratio is the typical multiplicative error, so 1.6 means predictions are typically within about 1.6x."
   },
   "rule_layer": {
-    "positive_rate": 0.015030008278145695,
+    "positive_rate": 0.015077224810002452,
     "agreement_with_shipped_flags": {
       "rule_sanction_delay": {
         "agreement": 0.9995,
-        "shipped_true": 3783,
-        "recomputed_true": 3818,
-        "both_true": 3783
+        "shipped_true": 3453,
+        "recomputed_true": 3487,
+        "both_true": 3453
       },
       "rule_stuck_work": {
-        "agreement": 0.9859,
-        "shipped_true": 384,
-        "recomputed_true": 1474,
-        "both_true": 384
+        "agreement": 0.9855,
+        "shipped_true": 374,
+        "recomputed_true": 1437,
+        "both_true": 374
       },
       "rule_cost_outlier": {
-        "agreement": 0.9526,
-        "shipped_true": 933,
-        "recomputed_true": 4600,
-        "both_true": 933
+        "agreement": 0.9508,
+        "shipped_true": 900,
+        "recomputed_true": 4509,
+        "both_true": 900
       },
       "rule_fast_completion": {
-        "agreement": 0.9806,
-        "shipped_true": 1850,
-        "recomputed_true": 3346,
-        "both_true": 1850
+        "agreement": 0.9816,
+        "shipped_true": 1755,
+        "recomputed_true": 3106,
+        "both_true": 1755
       },
       "rule_round_amount": {
         "agreement": 1.0,
-        "shipped_true": 28097,
-        "recomputed_true": 28097,
-        "both_true": 28097
+        "shipped_true": 26820,
+        "recomputed_true": 26820,
+        "both_true": 26820
       },
       "rule_vendor_concentration": {
         "agreement": 1.0,
@@ -152,92 +172,92 @@
         "both_true": 3279
       },
       "rule_payment_stuck": {
-        "agreement": 0.9989,
-        "shipped_true": 318,
-        "recomputed_true": 233,
-        "both_true": 233
+        "agreement": 0.9988,
+        "shipped_true": 317,
+        "recomputed_true": 232,
+        "both_true": 232
       },
       "label": {
         "agreement": 0.9818,
-        "shipped_positive": 933,
-        "recomputed_positive": 1162
+        "shipped_positive": 897,
+        "recomputed_positive": 1107
       }
     },
     "note": "Rules are recomputed from observable columns so they respond to corrected or uploaded data, which the shipped flag_* columns cannot. They are a fusion signal, never a model input."
   },
   "n_features": 33,
   "duplicates": {
-    "pairs": 72403,
-    "clusters": 3793,
-    "works_flagged": 18327
+    "pairs": 69174,
+    "clusters": 3618,
+    "works_flagged": 17482
   },
   "split_works": {
-    "groups": 1027,
-    "works": 7069,
-    "with_same_vendor": 487
+    "groups": 1004,
+    "works": 6801,
+    "with_same_vendor": 492
   },
   "delay_model": {
-    "n_labelled": 44371,
-    "n_train": 35497,
-    "n_test": 8874,
-    "delay_rate_train": 0.40775276783953573,
-    "delay_rate_test": 0.48366013071895425,
+    "n_labelled": 42348,
+    "n_train": 33879,
+    "n_test": 8469,
+    "delay_rate_train": 0.4124383836594941,
+    "delay_rate_test": 0.4943913094816389,
     "train_sanction_max": "2025-07-10",
     "test_sanction_min": "2025-07-10",
     "device": "cuda",
     "split": "time-based: oldest sanctions train, newest test",
     "horizon_days": 365,
-    "roc_auc": 0.8698568449091485,
-    "pr_auc": 0.842327519080755
+    "roc_auc": 0.8732491652784854,
+    "pr_auc": 0.8587882459193393
   },
   "supervised_model": {
-    "n_rows": 77312,
-    "n_positive": 933,
-    "positive_rate": 0.01206798427152318,
-    "scale_pos_weight": 81.86387995712755,
+    "n_rows": 73422,
+    "n_positive": 897,
+    "positive_rate": 0.012217046661763504,
+    "scale_pos_weight": 80.85284280936455,
     "n_splits": 5,
     "grouped_by": "constituency",
     "cv": "GroupKFold by constituency (no area spans train and test)",
     "device": "cuda",
-    "pr_auc_oof": 0.9352130346485688,
-    "roc_auc_oof": 0.9794261024733837,
+    "pr_auc_oof": 0.93511379835423,
+    "roc_auc_oof": 0.9671516184208959,
     "pr_auc_folds": [
-      0.9922,
-      0.9864,
-      0.9584,
-      0.7814,
-      0.9878
+      0.9729,
+      0.9868,
+      0.9541,
+      0.8024,
+      0.9984
     ],
     "roc_auc_folds": [
-      0.9998,
-      0.9996,
-      0.9967,
-      0.9127,
-      0.9997
+      0.9992,
+      0.9995,
+      0.997,
+      0.8735,
+      1.0
     ],
-    "baseline_pr_auc": 0.01206798427152318,
+    "baseline_pr_auc": 0.012217046661763504,
     "CAVEAT": "anomaly_label is a rule-based PROXY, not confirmed fraud: it equals (anomaly_score >= 4) where anomaly_score is a weighted sum of 7 hand-written flags. This model learns to reproduce and generalise that rule set. Treat its output as a risk indicator for review, never as evidence of wrongdoing.",
     "precision_at_100": 1.0,
-    "precision_at_500": 0.996
+    "precision_at_500": 1.0
   },
   "band_cutoffs": {
-    "critical": 95.05,
-    "high": 85.16,
-    "medium": 64.06
+    "critical": 95.19,
+    "high": 85.47,
+    "medium": 64.17
   },
   "band_method": "percentile",
   "risk_bands": {
-    "Low": 61847,
-    "Medium": 11599,
-    "High": 3092,
-    "Critical": 774
+    "Low": 58737,
+    "Medium": 11013,
+    "High": 2922,
+    "Critical": 750
   },
   "alerts": {
-    "total": 8686,
+    "total": 8294,
     "by_type": {
-      "high_risk_work": 3866,
-      "duplicate_group": 3793,
-      "split_work_group": 1027
+      "high_risk_work": 3672,
+      "duplicate_group": 3618,
+      "split_work_group": 1004
     }
   },
   "weights": {
@@ -249,23 +269,83 @@
     "delay": 0.12
   },
   "timings_seconds": {
-    "load works": 0.18,
-    "embed descriptions (GPU)": 0.1,
-    "work type": 28.72,
-    "quantity + expected cost": 44.37,
-    "rule layer": 2.48,
-    "features": 1.07,
-    "unsupervised anomaly": 18.47,
-    "duplicates": 109.51,
-    "split works": 17.6,
-    "delay model": 5.94,
-    "supervised proxy model": 10.54,
-    "risk fusion": 0.06,
-    "reasons (EN + HI)": 9.86,
-    "assemble + roll up": 5.22,
-    "save outputs": 1.17
+    "load works": 0.24,
+    "embed descriptions (GPU)": 0.07,
+    "work type": 18.6,
+    "quantity + expected cost": 43.8,
+    "rule layer": 1.63,
+    "features": 0.68,
+    "unsupervised anomaly": 11.2,
+    "duplicates": 70.54,
+    "split works": 12.43,
+    "delay model": 4.96,
+    "supervised proxy model": 7.63,
+    "risk fusion": 0.04,
+    "reasons (EN + HI)": 6.43,
+    "assemble + roll up": 3.58,
+    "save outputs": 0.79
   },
-  "total_seconds": 255.54,
+  "total_seconds": 182.74,
+  "holdout_evaluation": {
+    "n_holdout_works": 3890,
+    "n_holdout_constituencies": 27,
+    "risk_bands": {
+      "train": {
+        "counts": {
+          "Low": 58737,
+          "Medium": 11013,
+          "High": 2922,
+          "Critical": 750
+        },
+        "shares": {
+          "Low": 0.8,
+          "Medium": 0.15,
+          "High": 0.0398,
+          "Critical": 0.0102
+        },
+        "n": 73422
+      },
+      "holdout": {
+        "counts": {
+          "Low": 3150,
+          "Medium": 596,
+          "High": 99,
+          "Critical": 45
+        },
+        "shares": {
+          "Low": 0.8098,
+          "Medium": 0.1532,
+          "High": 0.0254,
+          "Critical": 0.0116
+        },
+        "n": 3890
+      }
+    },
+    "delay_model": {
+      "train_test_split": {
+        "roc_auc": 0.8732491652784854,
+        "pr_auc": 0.8587882459193393,
+        "note": "time-based split inside the training constituencies"
+      },
+      "holdout": {
+        "n_labelled": 2023,
+        "delay_rate": 0.2996,
+        "roc_auc": 0.9092,
+        "pr_auc": 0.8729
+      }
+    },
+    "how_exclusion_was_verified": [
+      "The split happens in ml.pipeline.run before any stage that fits or aggregates, so no later stage can see a held-out row.",
+      "Whole constituencies are held out, not rows, so a held-out work's neighbours are absent too and cannot carry it into vendor or district history.",
+      "ml.holdout.verify asserts no shared work_id and no shared constituency between the two sets; both checks are recorded in metrics.json under 'holdout'.",
+      "Selection is a deterministic hash of constituency name and seed, so it cannot drift between runs or machines.",
+      "tests/test_holdout.py re-derives the split and fails if any held-out constituency appears in the scored training output."
+    ],
+    "caveats": [
+      "Held-out works are scored like an uploaded CSV, so their peer comparisons come from within the 3,890-work batch rather than the national population. That makes the cost signal noisier here than in production, not cleaner.",
+      "Band counts compare distributions. They are not an accuracy measure, because no work in this data carries a verified fraud label."
+    ]
+  },
   "feature_list": [
     "amount_vs_peer_median",
     "cost_pct_in_type",

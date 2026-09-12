@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ml import holdout as holdout_module
 from ml.config import load_config, resolve
 from ml.data import clean, load_raw
 from ml.detect_anomaly import detect
@@ -182,6 +183,7 @@ def run(
     use_embeddings: bool = True,
     train_models: bool = True,
     save: bool = True,
+    apply_holdout: bool = True,
 ) -> PipelineResult:
     """Run every stage end to end.
 
@@ -200,6 +202,36 @@ def run(
         works = load_works(cfg) if df is None else df.copy()
         works = works.reset_index(drop=True)
 
+        # Reserve the holdout BEFORE anything is fitted or any statistic is
+        # computed. Everything downstream, including peer medians and district
+        # history, then sees the training portion only. Skipped when the caller
+        # supplies its own frame, because that is a scoring run, not a fit.
+        if df is None and apply_holdout and holdout_module.is_enabled(cfg):
+            split = holdout_module.split(works, cfg)
+            works = split.train
+            if save:
+                holdout_module.save(split.holdout, cfg)
+                holdout_module.write_config(split.constituencies, split.checks, cfg)
+            metrics["holdout"] = {
+                **split.checks,
+                "constituencies_file": "configs/holdout.yaml",
+                "excluded_from": [
+                    "expected-cost model",
+                    "delay model",
+                    "proxy-label model",
+                    "isolation forest and ECOD",
+                    "peer group medians and MADs",
+                    "vendor, district and constituency statistics",
+                    "duplicate and split-work candidate generation",
+                ],
+            }
+            print(
+                f"  holdout: {len(split.holdout):,} works across "
+                f"{len(split.constituencies)} constituencies held out before fitting",
+                flush=True,
+            )
+
+    models: dict[str, Any] = {}
     embeddings: np.ndarray | None = None
     if use_embeddings:
         with timer.stage("embed descriptions (GPU)"):
@@ -222,7 +254,18 @@ def run(
         quantities = add_unit_rates(works, extract(works["work_description"]), cfg)
         metrics["quantity_extraction"] = coverage(quantities)
 
-        cost = fit_predict(works, quantities, embeddings, cfg)
+        cost_artifacts_path = resolve(cfg["paths"]["models_dir"]) / "expected_cost.joblib"
+        if not train_models and cost_artifacts_path.exists():
+            # Scoring run: price against the TRAINING model, never against the
+            # batch itself.
+            import joblib
+
+            from ml.expected_cost import apply_saved
+
+            cost = apply_saved(works, quantities, embeddings, joblib.load(cost_artifacts_path), cfg)
+        else:
+            cost = fit_predict(works, quantities, embeddings, cfg)
+            models["expected_cost"] = cost.artifacts
         works["quantity"] = quantities["quantity"].to_numpy()
         works["unit_rate"] = quantities["unit_rate"].to_numpy()
         works["expected_log_amount"] = cost.predicted_log_amount.to_numpy()
@@ -288,7 +331,6 @@ def run(
     supervised_reasons = pd.Series(
         [[] for _ in range(len(works))], index=works.index, dtype="object"
     )
-    models: dict[str, Any] = {}
 
     if train_models:
         with timer.stage("delay model"):
@@ -367,6 +409,12 @@ def run(
 
         cuts = band_cutoffs(scored["risk_score"], cfg)
         metrics["band_cutoffs"] = {k: round(float(v), 2) for k, v in cuts.items()}
+        if save and train_models:
+            # Persist them: an upload must be banded against the national
+            # distribution, not against its own handful of rows.
+            cuts_path = resolve(cfg["paths"]["models_dir"]) / "band_cutoffs.json"
+            cuts_path.parent.mkdir(parents=True, exist_ok=True)
+            cuts_path.write_text(json.dumps(metrics["band_cutoffs"], indent=2), encoding="utf-8")
         metrics["band_method"] = str(cfg["risk"].get("band_method", "absolute"))
         band_counts = scored["band"].value_counts()
         metrics["risk_bands"] = {
@@ -437,7 +485,10 @@ def _save_outputs(
         models_dir = resolve(paths["models_dir"])
         models_dir.mkdir(parents=True, exist_ok=True)
         for name, model in models.items():
-            joblib.dump(model, models_dir / f"{name}_model.joblib")
+            # The expected-cost entry is a bundle (model, SVD, residual stats),
+            # not a bare estimator, so it gets its own filename.
+            filename = "expected_cost.joblib" if name == "expected_cost" else f"{name}_model.joblib"
+            joblib.dump(model, models_dir / filename)
 
 
 def score_new_works(df: pd.DataFrame, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -464,39 +515,50 @@ def score_new_works(df: pd.DataFrame, cfg: dict[str, Any] | None = None) -> pd.D
     if delay_path.exists() or supervised_path.exists():
         import joblib
 
-        feats, names = build_features(prepared, cfg)
-        delay_risk = pd.Series(0.0, index=prepared.index)
-        supervised_prob = pd.Series(0.0, index=prepared.index)
+        # Rebuild features from the SCORED frame, not the input. The run above
+        # derived work_type, the rule columns and the cost signal; the input
+        # frame has none of them, and build_features refuses without work_type.
+        context = scored.reset_index(drop=True)
+        feats, names = build_features(context, cfg)
+        delay_risk = pd.Series(0.0, index=context.index)
+        supervised_prob = pd.Series(0.0, index=context.index)
 
         if delay_path.exists():
             from ml.train_delay import build_matrix
 
-            matrix, _ = build_matrix(prepared, cfg)
+            matrix, _ = build_matrix(context, cfg)
             model = joblib.load(delay_path)
             model.get_booster().set_param({"device": "cpu"})
-            delay_risk = pd.Series(model.predict_proba(matrix)[:, 1], index=prepared.index).where(
-                prepared["completion_date"].isna(), 0.0
+            delay_risk = pd.Series(model.predict_proba(matrix)[:, 1], index=context.index).where(
+                context["completion_date"].isna(), 0.0
             )
 
         if supervised_path.exists():
             model = joblib.load(supervised_path)
             model.get_booster().set_param({"device": "cpu"})
             supervised_prob = pd.Series(
-                model.predict_proba(feats[names])[:, 1], index=prepared.index
+                model.predict_proba(feats[names])[:, 1], index=context.index
             )
 
+        cuts_path = models_dir / "band_cutoffs.json"
+        training_cuts = (
+            json.loads(cuts_path.read_text(encoding="utf-8")) if cuts_path.exists() else None
+        )
         signals = score(
-            prepared,
+            context,
             feats,
-            scored["unsupervised"],
+            context["unsupervised"],
             supervised_prob,
-            scored["duplicate"],
-            scored["in_split_group"],
+            context["duplicate"],
+            context["in_split_group"],
             delay_risk,
             cfg,
+            cuts=training_cuts,
         )
+        scored = context
         for col in signals.columns:
             scored[col] = signals[col].to_numpy()
+        scored["delay_risk"] = delay_risk.to_numpy()
 
     scored["scoring_scope"] = (
         "peer comparisons computed within the uploaded batch only"

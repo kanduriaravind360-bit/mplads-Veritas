@@ -139,3 +139,21 @@ saved artefacts only and never retrains, so it opens in about a second.
 The Model Performance page carries the caveats rather than hiding them: the
 proxy-label warning and the split-work detector at 46%. This is a temporary demo
 for the hackathon round; the role-based dashboard comes later.
+
+**Step 2e — live-scoring demo data + holdout.** Two ways to score works the
+system has never seen, both through the same code path as any upload.
+
+`demo_data/live_demo_works.csv` holds 13 invented works, clearly badged as
+synthetic, built to exercise each detector. Scored in about 9 seconds.
+
+A **5% holdout** is reserved before anything is fitted: 27 whole constituencies,
+3,890 works, listed in `configs/holdout.yaml`. Whole constituencies rather than
+rows, because vendor and district history is computed within an area, so holding
+out a single row would leave its neighbours in training. The delay model scores
+**0.909 ROC-AUC on the holdout against 0.873** on its own test split, and the
+band distribution barely moves (81.0% Low against 80.0%), so it is not
+memorising districts.
+
+Three fixes fell out of building this: uploads were banding against percentiles
+of their own batch, the expected-cost model was being refit per upload rather
+than reused, and `score_new_works` rebuilt features from the wrong frame.

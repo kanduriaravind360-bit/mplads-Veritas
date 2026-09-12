@@ -41,21 +41,22 @@ class ExpectedCostResult:
     unit_rate_pct: pd.Series
     cost_signal: pd.Series
     metrics: dict[str, Any] = field(default_factory=dict)
+    artifacts: dict[str, Any] = field(default_factory=dict)
 
 
 def _embedding_components(
     embeddings: np.ndarray | None, cfg: dict[str, Any], n_rows: int
-) -> np.ndarray:
-    """Reduce description embeddings with SVD, or return nothing if unavailable."""
+) -> tuple[np.ndarray, Any]:
+    """Reduce description embeddings with SVD; also return the fitted reducer."""
     if embeddings is None or len(embeddings) != n_rows:
-        return np.zeros((n_rows, 0), dtype="float32")
+        return np.zeros((n_rows, 0), dtype="float32"), None
 
     from sklearn.decomposition import TruncatedSVD
 
     n_components = int(cfg["expected_cost"]["svd_components"])
     n_components = min(n_components, embeddings.shape[1] - 1, max(1, n_rows - 1))
     svd = TruncatedSVD(n_components=n_components, random_state=int(cfg["seed"]))
-    return svd.fit_transform(embeddings).astype("float32")
+    return svd.fit_transform(embeddings).astype("float32"), svd
 
 
 def _design_matrix(
@@ -103,7 +104,7 @@ def fit_predict(
     amount = pd.to_numeric(df["sanction_amount"], errors="coerce").astype("float64")
     target = np.log1p(amount.clip(lower=0))
 
-    components = _embedding_components(embeddings, cfg, len(df))
+    components, svd = _embedding_components(embeddings, cfg, len(df))
     matrix = _design_matrix(df, quantities, components, cfg)
 
     params = xgb_params(dict(ecfg["xgb"]))
@@ -161,6 +162,34 @@ def fit_predict(
         ),
     }
 
+    # Refit on everything and keep the pieces needed to price a work the model
+    # has never seen. Without these, scoring an upload refits the model on the
+    # upload itself: a 12-row CSV cannot learn what a hand pump costs, so the
+    # cost detector silently does nothing on exactly the small batches a
+    # district office would send.
+    final, _ = fit_with_fallback(factory, params, matrix, target)
+    final.get_booster().set_param({"device": "cpu"})
+    residual_by_type = (
+        pd.DataFrame({"work_type": df["work_type"].astype(str), "residual": residual})
+        .groupby("work_type")["residual"]
+        .agg(["median", lambda s: float((s - s.median()).abs().median())])
+    )
+    residual_by_type.columns = ["median", "mad"]
+
+    artifacts = {
+        "model": final,
+        "svd": svd,
+        "columns": list(matrix.columns),
+        "categoricals": {
+            column: list(matrix[column].cat.categories)
+            for column in matrix.columns
+            if str(matrix[column].dtype) == "category"
+        },
+        "residual_by_type": residual_by_type.to_dict("index"),
+        "residual_median_global": float(residual.median()),
+        "residual_mad_global": float((residual - residual.median()).abs().median()),
+    }
+
     return ExpectedCostResult(
         predicted_log_amount=predictions.rename("expected_log_amount"),
         residual=residual,
@@ -168,6 +197,7 @@ def fit_predict(
         unit_rate_pct=unit_pct.rename("unit_rate_pct"),
         cost_signal=signal.rename("cost_signal"),
         metrics=metrics,
+        artifacts=artifacts,
     )
 
 
@@ -188,3 +218,73 @@ def _combine(residual_z: pd.Series, unit_rate_pct: pd.Series, cfg: dict[str, Any
         ((unit_rate_pct - pct_start) / max(1e-9, 1.0 - pct_start)).clip(0.0, 1.0).fillna(0.0)
     )
     return pd.concat([from_z, from_rate], axis=1).max(axis=1)
+
+
+def apply_saved(
+    df: pd.DataFrame,
+    quantities: pd.DataFrame,
+    embeddings: np.ndarray | None,
+    artifacts: dict[str, Any],
+    cfg: dict[str, Any] | None = None,
+) -> ExpectedCostResult:
+    """Price works with a previously fitted model, using training statistics.
+
+    This is what an upload should go through. Refitting on the uploaded batch
+    instead makes the cost detector useless on small files, because a handful of
+    rows cannot establish what anything ought to cost.
+    """
+    cfg = cfg or load_config("ml")
+
+    svd = artifacts.get("svd")
+    if svd is not None and embeddings is not None and len(embeddings) == len(df):
+        components = svd.transform(embeddings).astype("float32")
+    else:
+        components = np.zeros((len(df), 0), dtype="float32")
+
+    matrix = _design_matrix(df, quantities, components, cfg)
+
+    # Align to the training design exactly: same columns, same order, and the
+    # same category levels, so an unseen state or work type is treated as
+    # missing rather than shifting every column along by one.
+    for column, categories in artifacts.get("categoricals", {}).items():
+        if column in matrix.columns:
+            matrix[column] = pd.Categorical(matrix[column].astype(str), categories=categories)
+    for column in artifacts.get("columns", []):
+        if column not in matrix.columns:
+            matrix[column] = 0.0
+    matrix = matrix[artifacts["columns"]]
+
+    model = artifacts["model"]
+    amount = pd.to_numeric(df["sanction_amount"], errors="coerce").astype("float64")
+    target = np.log1p(amount.clip(lower=0))
+    predictions = pd.Series(model.predict(matrix), index=df.index, dtype="float64")
+    residual = (target - predictions).rename("cost_residual")
+
+    scale = float(cfg["features"]["mad_scale"])
+    floor = float(cfg["expected_cost"]["min_residual_mad"])
+    by_type: dict[str, dict[str, float]] = artifacts.get("residual_by_type", {})
+    global_median = float(artifacts.get("residual_median_global", 0.0))
+    global_mad = float(artifacts.get("residual_mad_global", floor))
+
+    types = df["work_type"].astype(str)
+    medians = types.map(lambda t: by_type.get(t, {}).get("median", global_median))
+    mads = types.map(lambda t: by_type.get(t, {}).get("mad", global_mad))
+    spread = (scale * mads.astype("float64").clip(lower=floor)).replace(0, np.nan)
+    clip = float(cfg["features"]["z_clip"])
+    residual_z = ((residual - medians.astype("float64")) / spread).clip(-clip, clip)
+    residual_z = residual_z.fillna(0.0).rename("cost_residual_z")
+
+    unit_pct = (
+        quantities["unit_rate_pct"]
+        if "unit_rate_pct" in quantities.columns
+        else pd.Series(np.nan, index=df.index)
+    )
+
+    return ExpectedCostResult(
+        predicted_log_amount=predictions.rename("expected_log_amount"),
+        residual=residual,
+        residual_z=residual_z,
+        unit_rate_pct=unit_pct.rename("unit_rate_pct"),
+        cost_signal=_combine(residual_z, unit_pct, cfg).rename("cost_signal"),
+        metrics={"source": "saved model", "n_rows": int(len(df))},
+    )

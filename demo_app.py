@@ -721,67 +721,205 @@ def page_model_performance(metrics: dict[str, Any]) -> None:
             )
 
 
+DEMO_CSV = ROOT / "demo_data" / "live_demo_works.csv"
+
+
+@st.cache_data(show_spinner=False)
+def load_demo_works() -> pd.DataFrame:
+    return pd.read_csv(DEMO_CSV) if DEMO_CSV.exists() else pd.DataFrame()
+
+
+@st.cache_data(show_spinner=False)
+def load_holdout_works() -> pd.DataFrame:
+    path = PROCESSED / "holdout_works.parquet"
+    return pd.read_parquet(path) if path.exists() else pd.DataFrame()
+
+
+def _score(frame: pd.DataFrame) -> tuple[pd.DataFrame, float]:
+    """Score a batch through the same path an upload takes, and time it."""
+    import time as _time
+
+    from ml.pipeline import score_new_works
+
+    start = _time.perf_counter()
+    result = score_new_works(frame)
+    return result, _time.perf_counter() - start
+
+
+def _band_summary(result: pd.DataFrame, elapsed: float) -> None:
+    st.success(f"{len(result):,} works scored in {elapsed:.1f} s")
+    counts = result["band"].value_counts()
+    columns = st.columns(4)
+    for column, band in zip(columns, BAND_ORDER, strict=False):
+        column.metric(band, indian_count(counts.get(band, 0)))
+
+
+def _results_table(result: pd.DataFrame) -> None:
+    view = result.sort_values("risk_score", ascending=False)
+    table = view[["work_id", "work_description", "sanction_amount", "risk_score", "band"]].rename(
+        columns={"work_description": "description", "sanction_amount": "amount"}
+    )
+    st.dataframe(
+        table,
+        hide_index=True,
+        use_container_width=True,
+        height=380,
+        column_config={
+            "amount": st.column_config.NumberColumn("Amount", format="%.0f"),
+            "risk_score": st.column_config.ProgressColumn(
+                "Risk", min_value=0, max_value=100, format="%.1f"
+            ),
+        },
+    )
+    st.markdown("**Reasons**")
+    for _, work in view.head(8).iterrows():
+        reasons = as_list(work.get("reasons_en"))
+        with st.container(border=True):
+            st.markdown(
+                f"**{work['work_id']}** {band_badge(work['band'])} &nbsp; "
+                f"{work['risk_score']:.0f} &nbsp; {inr(work['sanction_amount'])}",
+                unsafe_allow_html=True,
+            )
+            for text in reasons[:4]:
+                st.markdown(f"- {text}")
+
+
+_DEMO_MISSES = (
+    "Two of these are honest misses, kept in rather than tuned away. The mildly overpriced "
+    "solar light is not flagged: at Rs 52,360 it is ordinary for a solar light nationally, "
+    "even though it is 2.5x the Uttar Pradesh median. The fast completion trips its rule, but "
+    "one rule alone cannot reach the High cut-off."
+)
+
+
 def page_live_scoring(scored: pd.DataFrame) -> None:
     st.subheader("Live scoring")
     st.caption(
-        "Score works the model has not been shown in this session. Uploads are scored with the "
-        "saved models; nothing is retrained."
+        "Works scored on the spot, through exactly the same code path as any uploaded file. "
+        "Nothing is retrained and nothing is special-cased."
     )
 
-    uploaded = st.file_uploader("Upload a CSV of works", type=["csv"])
-    sample_clicked = st.button("Or sample 100 unseen works", type="primary")
+    tab_demo, tab_holdout, tab_upload = st.tabs(
+        ["Score demo works", "Score 100 never-seen works", "Upload your own CSV"]
+    )
 
-    frame: pd.DataFrame | None = None
-    if uploaded is not None:
-        frame = pd.read_csv(uploaded)
-        st.success(f"Loaded {len(frame):,} rows from {uploaded.name}")
-    elif sample_clicked:
-        from ml.data import load_processed
+    with tab_demo:
+        st.markdown(
+            f"<span style='background:{AMBER};color:#fff;padding:4px 12px;"
+            f"border-radius:12px;font-weight:600'>"
+            f"Synthetic demo works — not real records</span>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Thirteen invented works with invented vendors and villages, built to exercise each "
+            "detector. The MP name is a placeholder; nothing is attributed to a real person."
+        )
+        demo = load_demo_works()
+        if demo.empty:
+            st.warning("demo_data/live_demo_works.csv is missing.")
+        elif st.button("Score demo works", type="primary", key="score_demo"):
+            result, elapsed = _score(demo.drop(columns=["demo_key", "expected_outcome"]))
+            _band_summary(result, elapsed)
 
-        raw = load_processed()
-        frame = raw.sample(n=min(100, len(raw)), random_state=7).reset_index(drop=True)
-        st.success(f"Sampled {len(frame):,} works")
+            expected = dict(zip(demo["work_id"], demo["expected_outcome"], strict=True))
+            keys = dict(zip(demo["work_id"], demo["demo_key"], strict=True))
+            compare = result.assign(
+                what_it_is=result["work_id"].map(keys),
+                expected=result["work_id"].map(expected),
+            ).sort_values("risk_score", ascending=False)
 
-    if frame is None:
-        return
-
-    with st.spinner("Scoring…"):
-        from ml.pipeline import score_new_works
-
-        try:
-            result = score_new_works(frame)
-        except Exception as error:  # noqa: BLE001 - surfaced to the presenter
-            st.error(f"Could not score this file: {error}")
-            st.caption(
-                "The CSV needs the same columns as the source extract: work_id, state, ida, "
-                "constituency, work_description, sanction_date, sanction_amount and the rest."
+            st.markdown("**Expected against actual**")
+            st.dataframe(
+                compare[["what_it_is", "expected", "risk_score", "band", "sanction_amount"]].rename(
+                    columns={"sanction_amount": "amount"}
+                ),
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "amount": st.column_config.NumberColumn("Amount", format="%.0f"),
+                    "risk_score": st.column_config.ProgressColumn(
+                        "Risk", min_value=0, max_value=100, format="%.1f"
+                    ),
+                },
             )
-            return
+            st.info(_DEMO_MISSES)
+            _results_table(result)
 
-    counts = result["band"].value_counts()
-    cols = st.columns(4)
-    for column, band in zip(cols, BAND_ORDER, strict=False):
-        column.metric(band, indian_count(counts.get(band, 0)))
-
-    st.caption(
-        "Peer comparisons are computed within this batch alone, so a small upload gives weaker "
-        "cost comparisons than the full national run."
-    )
-
-    display = result.sort_values("risk_score", ascending=False)[
-        ["work_id", "state", "work_type", "sanction_amount", "risk_score", "band"]
-    ]
-    st.dataframe(display, hide_index=True, use_container_width=True, height=320)
-
-    st.markdown("**Top 5 with reasons**")
-    for _, work in result.sort_values("risk_score", ascending=False).head(5).iterrows():
-        with st.container(border=True):
+    with tab_holdout:
+        holdout = load_holdout_works()
+        if holdout.empty:
+            st.warning("No holdout found. Run `python -m ml.train` to build it.")
+        else:
             st.markdown(
-                f"**{work['work_id']}** {band_badge(work['band'])} — {work['risk_score']:.0f}",
+                f"<span style='background:{NAVY};color:#fff;padding:4px 12px;"
+                f"border-radius:12px;font-weight:600'>Excluded from all training</span>",
                 unsafe_allow_html=True,
             )
-            for text in as_list(work.get("reasons_en"))[:3]:
-                st.markdown(f"- {text}")
+            st.caption(
+                f"{len(holdout):,} real works from {holdout['constituency'].nunique()} whole "
+                "constituencies, held out before anything was fitted. No model and no peer "
+                "statistic has seen them, or their neighbours."
+            )
+            if st.button("Score 100 never-seen works", type="primary", key="score_holdout"):
+                sample = holdout.sample(n=min(100, len(holdout)), random_state=42)
+                result, elapsed = _score(sample.reset_index(drop=True))
+                _band_summary(result, elapsed)
+                _results_table(result)
+
+    with tab_upload:
+        demo = load_demo_works()
+        if not demo.empty:
+            template = demo.drop(columns=["demo_key", "expected_outcome"]).head(3)
+            st.download_button(
+                "Download a CSV template",
+                template.to_csv(index=False).encode("utf-8"),
+                file_name="mplads_upload_template.csv",
+                mime="text/csv",
+            )
+
+        uploaded = st.file_uploader("Upload a CSV of works", type=["csv"])
+        if uploaded is None:
+            return
+
+        try:
+            frame = pd.read_csv(uploaded)
+        except Exception as error:  # noqa: BLE001 - surfaced to the presenter
+            st.error(f"Could not read that file as CSV: {error}")
+            return
+
+        required = [
+            "work_id",
+            "state",
+            "ida",
+            "constituency",
+            "work_description",
+            "sanction_date",
+            "sanction_amount",
+            "work_status",
+        ]
+        missing = [column for column in required if column not in frame.columns]
+        if missing:
+            st.error("This file is missing required columns: " + ", ".join(missing))
+            st.caption("Download the template above to see the expected shape.")
+            return
+        if frame.empty:
+            st.error("That file has no rows.")
+            return
+
+        st.success(f"Loaded {len(frame):,} rows from {uploaded.name}")
+        try:
+            result, elapsed = _score(frame)
+        except Exception as error:  # noqa: BLE001 - surfaced to the presenter
+            st.error(f"Could not score this file: {error}")
+            return
+
+        _band_summary(result, elapsed)
+        st.caption(
+            "Peer comparisons come from within this batch, so a small or narrow upload gives "
+            "weaker cost comparisons than the national run. The cost, delay and risk models "
+            "themselves are the saved national ones."
+        )
+        _results_table(result)
 
 
 # ---------------------------------------------------------------------------

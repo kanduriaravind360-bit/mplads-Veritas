@@ -1,0 +1,45 @@
+generated_by: ml.holdout.split, via python -m ml.train
+seed: 42
+fraction_requested: 0.05
+note: These constituencies are excluded from every fitted model and from every peer, vendor,
+  district and constituency statistic. Selection is a deterministic hash of the constituency
+  name and the seed, so it is identical on any machine and cannot drift.
+checks:
+  n_train: 73422
+  n_holdout: 3890
+  holdout_share_of_works: 0.0503
+  n_holdout_constituencies: 27
+  no_shared_work_id: true
+  no_shared_constituency: true
+  split_unit: whole constituency
+  why_constituency: Splitting by row would leave a held-out work's neighbours in training,
+    and vendor concentration and district history are computed within an area, so the model
+    would effectively have seen it.
+constituencies:
+- ALAPPUZHA
+- ALIGARH
+- BAHRAICH(SC)
+- BANGALORE NORTH
+- BARAMULLAH
+- BHADRAK(SC)
+- DAHOD(ST)
+- Dr. Ajeet Madhavrao Gopchade (2024-30) (2024-2030)
+- ETAH
+- FATEHPUR SIKRI
+- GHATAL
+- HINDUPUR
+- JUNAGADH
+- KALLAKURICHI
+- KANCHEEPURAM(SC)
+- KARIMGANJ (SC)
+- KEONJHAR(ST)
+- MADHEPURA
+- MAHARAJGANJ_BR
+- MALAPPURAM
+- MANDLA(ST)
+- PATAN
+- SATNA
+- Shri Harsh Mahajan (2024-30) (2024-2030)
+- Shri P. Chidambaram (2022-28) (2022-2028)
+- Shri Sant Balbir Singh (2022-28) (2022-2028)
+- THOOTHUKKUDI

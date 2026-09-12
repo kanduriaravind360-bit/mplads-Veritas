@@ -99,6 +99,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip the synthetic injection test (roughly halves runtime)",
     )
+    parser.add_argument(
+        "--skip-holdout",
+        action="store_true",
+        help="skip scoring the held-out constituencies",
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -118,6 +123,20 @@ def main(argv: list[str] | None = None) -> int:
         injection = _previous_injection_metrics(cfg)
         if injection:
             print("\ninjection test skipped; carrying forward the previous results")
+
+    if not args.skip_holdout:
+        from ml import holdout as holdout_module
+
+        if holdout_module.is_enabled(cfg):
+            print("\nholdout evaluation (constituencies never seen by any model):")
+            from ml.evaluate_holdout import evaluate as evaluate_holdout
+
+            try:
+                result.metrics["holdout_evaluation"] = evaluate_holdout(
+                    result.scored, result.metrics, cfg
+                )
+            except FileNotFoundError as error:
+                print(f"  skipped: {error}")
 
     path = write_metrics(result.metrics, injection, result.feature_names, cfg)
 
@@ -191,6 +210,31 @@ def main(argv: list[str] | None = None) -> int:
                     [{"injection": k, "detector_fired": f"{v:.1%}"} for k, v in sorted(det.items())]
                 ),
             )
+
+    hold = result.metrics.get("holdout_evaluation")
+    if hold:
+        bands = hold["risk_bands"]
+        _print_table(
+            "Holdout vs training (holdout constituencies excluded from all fitting)",
+            pd.DataFrame(
+                [
+                    {
+                        "band": band,
+                        "train": f"{bands['train']['shares'][band]:.1%}",
+                        "holdout": f"{bands['holdout']['shares'][band]:.1%}",
+                    }
+                    for band in ("Low", "Medium", "High", "Critical")
+                ]
+            ),
+        )
+        delay = hold["delay_model"]
+        print(
+            f"\ndelay model  train split ROC-AUC {delay['train_test_split']['roc_auc']} / "
+            f"PR-AUC {delay['train_test_split']['pr_auc']}   "
+            f"holdout ROC-AUC {delay['holdout'].get('roc_auc')} / "
+            f"PR-AUC {delay['holdout'].get('pr_auc')} "
+            f"on {delay['holdout'].get('n_labelled', 0):,} labelled works"
+        )
 
     timings = result.metrics["timings_seconds"]
     print(f"\nstage timings (s): {timings}")
