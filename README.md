@@ -64,7 +64,7 @@ ruff check . && pytest
 
 | Path | Contents |
 |---|---|
-| `data/raw/` | Source eSAKSHI workbook (committed — private repo) |
+| `data/raw/` | Source eSAKSHI workbook (committed; public data, public repo) |
 | `data/processed/` | Parquet artefacts (gitignored) |
 | `configs/` | YAML thresholds and mappings |
 | `ml/` | Data loading, features, detectors, models |

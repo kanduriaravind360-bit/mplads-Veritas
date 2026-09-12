@@ -61,6 +61,10 @@ fraud, and must say so wherever its results are reported.
 
 - Results are **"risk indicators for review"**, never proof of fraud. Every
   surfaced item is a hypothesis for a human reviewer, with its evidence attached.
+- **The repository is PUBLIC.** The committed workbook is public eSAKSHI data, so
+  publishing it discloses nothing new. But anything *derived* that names a person
+  is a different matter: never commit a ranking, score or narrative that attaches
+  a judgement to a named MP, vendor or official. Scored outputs stay gitignored.
 - The data contains **real MP names and constituencies**. MP views show
   **"implementation risk of works recommended in this constituency"** — a
   statement about implementation by executing agencies, **never** a judgement of
@@ -117,7 +121,7 @@ file.
 ## Layout
 
 ```
-data/raw/          source xlsx (committed — private repo)
+data/raw/          source xlsx (committed; public eSAKSHI data, public repo)
 data/processed/    parquet artefacts (gitignored)
 configs/           *.yaml thresholds and settings
 ml/                data loading, features, detectors, models
