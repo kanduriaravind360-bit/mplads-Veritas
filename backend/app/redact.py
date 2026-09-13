@@ -8,9 +8,11 @@ always gets the same one), in structured fields and inside free-text
 descriptions, before the response leaves the server.
 
 Descriptions also name private beneficiaries ("handpump in front of the house of
-Shri X", "X S/o Y ke ghar ke samne"), about 4% of works. Presentation mode masks
-the name words next to an honorific or a relation marker. It over-masks a little
-("Sri Ram Temple" becomes "[name] Temple"), which is the right way to fail.
+Shri X", "X S/o Y ke ghar ke samne", "road from X ke ghar se Y ke ghar tak") and
+carry phone numbers. Presentation mode masks name words found by that context,
+and every mobile number; on the full extract that touches about 17% of
+descriptions. It over-masks a little ("Sri Ram Temple" becomes "[name] Temple"),
+which is the right way to fail.
 
 Places, work ids, amounts and scores are left as they are: they are what a
 reviewer needs, and they do not name a person.
@@ -32,7 +34,7 @@ _PERSON_LIKE = re.compile(r"^(shri|smt|dr|km|sushri|prof)\b|\(\d{4}-\d{2,4}\)", 
 
 
 _HONORIFICS = frozenset(
-    "shri sri sh shree smt shrimati srimati sushri kumari km kum late lt mr mrs ms".split()
+    "shri sri sh shree smt shrimati srimati sushri kumari late mr mrs ms".split()
 )
 # S/o, D/o, W/o (son, daughter, wife of). C/o is left alone: in this data it
 # almost always abbreviates "construction of".
@@ -40,10 +42,30 @@ _RELATION = re.compile(r"^[sdw]\s*[\\/.]\s*o\.?$", re.IGNORECASE)
 # Words that end a name: Hindi postpositions and the common place/structure words
 # that follow a name in these descriptions.
 _NAME_STOP = frozenset(
-    """ke ki ka k ko se tak me mein par pe ji ghar makan house home residence resident
+    """ke ki ka k ko se me mein par pe ji ghar makan house home residence resident
     near of in at the and to from for village gram vill ward no road gali marg temple
     mandir school son daughter wife r/o block district po ps teh tehsil""".split()
 )
+_POSSESSIVE = frozenset({"ke", "ki", "ka", "k"})
+_PREMISES = frozenset(
+    {
+        "ghar",
+        "ghr",
+        "makan",
+        "dukan",
+        "darwaje",
+        "dwar",
+        "house",
+        "residence",
+        "home",
+        "shop",
+        "land",
+    }
+)
+_PHONE = re.compile(r"(?<!\d)(?:\+?91[\s-]?)?[6-9]\d{9}(?!\d)")
+_GLUED = re.compile(r"([,;])(?=\S)")
+_HYPHEN_HONORIFIC = re.compile(r"-(?=(?:sh|shri|smt|sri)\b)", re.IGNORECASE)
+_KIN = frozenset({"son", "daughter", "wife", "husband"})
 _MASK = "[name]"
 _MAX_NAME_WORDS = 3
 
@@ -58,9 +80,18 @@ def _is_name_word(token: str) -> bool:
 
 
 def mask_private_names(text: str | None) -> str | None:
-    """Mask words that name a private person next to an honorific or S/o, D/o, W/o."""
+    """Mask words that name a private person, and phone numbers, in free text.
+
+    Names are recognised by context: after an honorific (Shri, Smt, Late),
+    around a relation marker (S/o, D/o, W/o), before "ke ghar" / "ki dukan"
+    (in front of X's house or shop) and after "house of".
+    """
     if not text:
         return text
+    text = _PHONE.sub("[phone]", text)
+    # "dukan,shri X" and "Contact-Sh. X": give glued punctuation a space.
+    text = _GLUED.sub(r"\1 ", text)
+    text = _HYPHEN_HONORIFIC.sub("- ", text)
     tokens = text.split()
     masked = [False] * len(tokens)
 
@@ -68,8 +99,7 @@ def mask_private_names(text: str | None) -> str | None:
         taken = 0
         i = start
         while i < len(tokens) and taken < _MAX_NAME_WORDS:
-            bare = _bare(tokens[i])
-            if bare in _HONORIFICS:
+            if _bare(tokens[i]) in _HONORIFICS:
                 masked[i] = True
                 i += 1
                 continue
@@ -81,20 +111,34 @@ def mask_private_names(text: str | None) -> str | None:
                 break
             i += 1
 
+    def mask_backward(end: int, limit: int = _MAX_NAME_WORDS) -> None:
+        back = end
+        taken = 0
+        while back >= 0 and taken < limit and _is_name_word(tokens[back]):
+            # A comma right before the marker closes the name; an earlier one ends it.
+            if taken and tokens[back][-1:] in ",;:":
+                break
+            masked[back] = True
+            taken += 1
+            back -= 1
+
     for i, token in enumerate(tokens):
         bare = _bare(token)
+        following = _bare(tokens[i + 1]) if i + 1 < len(tokens) else ""
+        previous = _bare(tokens[i - 1]) if i else ""
         if bare in _HONORIFICS:
             masked[i] = True
             mask_forward(i + 1)
         elif _RELATION.match(token.strip(",;:()")):
-            back = i - 1
-            taken = 0
-            while back >= 0 and taken < _MAX_NAME_WORDS and _is_name_word(tokens[back]):
-                if tokens[back][-1:] in ",;:":
-                    break
-                masked[back] = True
-                taken += 1
-                back -= 1
+            mask_backward(i - 1)
+            mask_forward(i + 1)
+        elif bare in _POSSESSIVE and following in _PREMISES:
+            # "Dharmendra ji ke ghar": step over the respectful "ji".
+            start = i - 2 if previous == "ji" else i - 1
+            mask_backward(start, limit=2)
+        elif bare in _KIN and following == "of":
+            mask_forward(i + 2)
+        elif bare == "of" and previous in _PREMISES:
             mask_forward(i + 1)
 
     out: list[str] = []

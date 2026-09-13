@@ -52,3 +52,14 @@ def test_constituency_list_is_alphabetical_and_unranked(client, auth) -> None:  
     keys = [(r["state"], r["constituency"]) for r in body["items"]]
     assert keys == sorted(keys)
     assert all("risk" not in k for row in body["items"] for k in row)
+
+
+def test_entitlement_only_where_it_is_comparable(client, auth) -> None:  # type: ignore[no-untyped-def]
+    def stages(who: str) -> list[str]:
+        body = client.get("/api/overview", headers=auth(who)).json()
+        return [s["stage"] for s in body["fund_flow"]]
+
+    assert stages("ministry")[0].startswith("Entitlement")
+    assert stages("mp_147")[0].startswith("Entitlement")
+    assert not any(s.startswith("Entitlement") for s in stages("district_lucknow"))
+    assert not any(s.startswith("Entitlement") for s in stages("state_up"))

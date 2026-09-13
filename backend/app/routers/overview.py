@@ -48,6 +48,26 @@ def overview(ctx: Context = Depends(context)) -> dict[str, Any]:
         ).all()
     )
 
+    fund_flow: list[dict[str, Any]] = []
+    # Entitlement is per MP, and an MP's works can span districts and, for Rajya
+    # Sabha members, states. It is only comparable at All-India or single-MP scope.
+    if ctx.user.role in ("MINISTRY", "MP"):
+        fund_flow.append(
+            {
+                "stage": "Entitlement (estimate)",
+                "amount": entitlement,
+                "estimate": True,
+                "note": (
+                    f"{totals['mps']} MPs x Rs 5 crore x {years} financial years; the "
+                    "extract carries no entitlement or release figures"
+                ),
+            }
+        )
+    fund_flow += [
+        {"stage": "Sanctioned", "amount": totals["sanctioned"], "estimate": False},
+        {"stage": "Disbursed", "amount": totals["disbursed"], "estimate": False},
+    ]
+
     districts = queries.group_risk(ctx.db, ctx.scope, "district", limit=10)
     vendors = queries.group_risk(ctx.db, ctx.scope, "vendor_name", limit=10)
     if get_settings().presentation_mode:
@@ -58,19 +78,7 @@ def overview(ctx: Context = Depends(context)) -> dict[str, Any]:
         "scope": ctx.scope.label,
         "role": ctx.user.role,
         "kpis": totals,
-        "fund_flow": [
-            {
-                "stage": "Entitlement (estimate)",
-                "amount": entitlement,
-                "estimate": True,
-                "note": (
-                    f"{totals['mps']} MPs x Rs 5 crore x {years} financial years; the "
-                    "extract carries no entitlement or release figures"
-                ),
-            },
-            {"stage": "Sanctioned", "amount": totals["sanctioned"], "estimate": False},
-            {"stage": "Disbursed", "amount": totals["disbursed"], "estimate": False},
-        ],
+        "fund_flow": fund_flow,
         "bands": queries.bands(ctx.db, ctx.scope),
         "alerts": {"by_severity": by_severity, "by_status": by_status},
         "top_districts": districts,

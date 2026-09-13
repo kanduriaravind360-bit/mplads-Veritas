@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from backend.app import models
 from backend.app.deps import Context, reviewer
+from backend.app.redact import redact_record
 from backend.app.services import ingest as svc
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
@@ -66,6 +67,8 @@ async def upload(
 
     scored, elapsed = await run_in_threadpool(svc.score, result.valid)
     summary = svc.summarise(scored, elapsed)
+    # Uploaded descriptions can name people too; presentation mode masks them here.
+    summary["top"] = [redact_record(row) for row in summary["top"]]
     response["scored"] = summary
     run.summary = summary
 

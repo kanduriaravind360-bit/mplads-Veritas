@@ -157,3 +157,21 @@ def test_vendor_graph_ids_do_not_carry_names(client, auth) -> None:  # type: ign
     assert vendor_ids and all("Invented" not in i for i in vendor_ids)
     ids = {n["id"] for n in body["nodes"]}
     assert all(e["source"] in ids and e["target"] in ids for e in body["edges"])
+
+
+def test_masking_covers_premises_kin_and_phone_numbers() -> None:
+    from backend.app.redact import mask_private_names
+
+    assert mask_private_names("Sonu ke ghar se Dharmendra ji ke ghar tak road") == (
+        "[name] ke ghar se [name] ji ke ghar tak road"
+    )
+    assert mask_private_names("house of Ramesh son of Rajendra Mishra in Padmakarpur") == (
+        "house of [name] son of [name] in Padmakarpur"
+    )
+    assert mask_private_names("Contact-Sh. Mukesh Choudhary mla-9997343123") == (
+        "Contact- [name] mla-[phone]"
+    )
+    # Kilometre and height abbreviations are not honorifics.
+    assert mask_private_names("road in Km 1/350 (9.5 mtrs Ht. with 6 LED)") == (
+        "road in Km 1/350 (9.5 mtrs Ht. with 6 LED)"
+    )

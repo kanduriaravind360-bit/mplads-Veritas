@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens. Navy command-centre palette, saffron used sparingly for focus,
+ * the active route and primary actions. Every text/background pair used for body
+ * text meets WCAG AA (4.5:1); saffron as text uses the lighter --saffron-text.
+ */
+:root {
+  --bg: 244 246 250;
+  --surface: 255 255 255;
+  --raised: 248 250 252;
+  --line: 222 228 237;
+  --ink: 11 31 58;
+  --muted: 74 91 115;
+  --faint: 120 136 158;
+  --saffron-strong: 169 72 10;
+  --saffron-text: 169 72 10;
+  --band-low: 21 128 97;
+  --band-medium: 161 120 8;
+  --band-high: 194 85 10;
+  --band-critical: 200 30 30;
+  --ok: 21 128 61;
+  --warn: 161 98 7;
+  --danger: 185 28 28;
+  --info: 29 78 216;
+  --map-empty: 226 232 240;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: 5 13 26;
+  --surface: 11 26 48;
+  --raised: 17 36 63;
+  --line: 32 54 86;
+  --ink: 230 237 247;
+  --muted: 148 166 191;
+  --faint: 104 122 150;
+  --saffron-strong: 184 82 13;
+  --saffron-text: 240 147 75;
+  --band-low: 45 170 130;
+  --band-medium: 212 175 55;
+  --band-high: 240 128 48;
+  --band-critical: 239 68 68;
+  --ok: 52 199 120;
+  --warn: 234 179 8;
+  --danger: 248 113 113;
+  --info: 96 165 250;
+  --map-empty: 24 42 70;
+  color-scheme: dark;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg text-ink font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+    font-size: 14px;
+  }
+  /* Figures line up in every table and KPI. */
+  .num,
+  table,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display tracking-tight;
+  }
+  :focus-visible {
+    outline: 2px solid #c55a11;
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  ::selection {
+    background: rgb(197 90 17 / 0.35);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--line)) transparent;
+  }
+  html[lang="hi"] body {
+    font-size: 15px;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border border-line bg-surface shadow-card;
+  }
+  .eyebrow {
+    @apply text-2xs font-semibold uppercase tracking-[0.08em] text-muted;
+  }
+  .grid-bg {
+    background-image: linear-gradient(rgb(var(--line) / 0.35) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--line) / 0.35) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+}
+
+/* Leaflet sits on the themed surface. */
+.leaflet-container {
+  background: rgb(var(--surface));
+  font-family: inherit;
+}
+.leaflet-tooltip.sentinel-tip {
+  @apply rounded-md border border-line bg-raised px-3 py-2 text-ink shadow-pop;
+}
+.leaflet-tooltip.sentinel-tip::before {
+  display: none;
+}
+.recharts-tooltip-wrapper {
+  outline: none;
+}

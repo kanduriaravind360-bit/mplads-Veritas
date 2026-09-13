@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 
 from backend.app.deps import Context, context
 from backend.app.metrics_doc import metrics
+from backend.app.settings import get_settings
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -58,7 +59,7 @@ def summary(ctx: Context = Depends(context)) -> dict[str, Any]:
         "proxy_model": {
             "pr_auc_oof": supervised.get("pr_auc_oof"),
             "roc_auc_oof": supervised.get("roc_auc_oof"),
-            "caveat": supervised.get("caveat"),
+            "caveat": supervised.get("CAVEAT") or supervised.get("caveat"),
         },
         "holdout_bands": holdout.get("risk_bands", {}),
         "holdout_size": {
@@ -71,10 +72,15 @@ def summary(ctx: Context = Depends(context)) -> dict[str, Any]:
         "weights": m.get("weights", {}),
         "weak_spot": injection.get("weakest_detector_plain_language"),
         "caveats": [
-            supervised.get("caveat")
+            supervised.get("CAVEAT")
+            or supervised.get("caveat")
             or "The proxy label is a hand-written rule set, not verified fraud.",
             injection.get("weakest_detector_plain_language"),
+            *([injection["CAVEAT"]] if injection.get("CAVEAT") else []),
             *(holdout.get("caveats") or []),
         ],
         "explanations": _EXPLAIN,
+        "thresholds": {
+            "high_delay_risk": float(get_settings().api["predictions"]["high_delay_risk"]),
+        },
     }

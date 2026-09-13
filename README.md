@@ -63,11 +63,26 @@ Demo users, all with password `demo123`: `ministry@demo`, `state.up@demo`
 `PRESENTATION_MODE=1` for any screenshot, deck or public link: it replaces MP and
 vendor names with stable pseudonyms in every API response.
 
+Start the dashboard (React, served on http://127.0.0.1:5173 with `/api` proxied
+to the API):
+
+```bash
+npm --prefix frontend install
+npm --prefix frontend run dev
+```
+
 Run the checks:
 
 ```bash
 ruff check . && pytest
+npm --prefix frontend run typecheck && npm --prefix frontend test
+npm --prefix frontend run e2e
 ```
+
+The end-to-end suite builds the production bundle, logs in as each of the four
+roles, visits every page, fails on any console error, checks scoping, and writes
+screenshots to `presentation/assets/screens/`. It refuses to run unless the API
+reports presentation mode, because those screenshots are committed.
 
 > **Note on pinned versions.** This machine runs Windows Smart App Control in
 > enforced mode, which blocks compiled extension DLLs with no established
@@ -205,3 +220,24 @@ exists. On the real data the Lucknow reviewer sees 270 works and 76 alerts, and
 asking for another state returns nothing. The audit trail is a SHA-256 hash
 chain, and tests show that editing, deleting or re-hashing any past event is
 detected. 88 API tests run on a synthetic database with invented names.
+
+**Step 3c — dashboard.** React 18, Vite, strict TypeScript, Tailwind and Radix
+primitives in a navy command-centre design, with English and Hindi, dark and
+light themes, a Ctrl K palette that searches works, alerts and districts, and
+Indian lakh/crore figures that show the exact amount in words on hover. Twelve
+pages run on live API data: Command Centre, Risk Map, Alerts Inbox (j/k/e
+triage and an evidence drawer), Work Detail, Duplicate Finder, Vendor Network,
+Delays, Compliance, Trends, MP Portfolio, Model Performance and Data Ingest.
+Every panel has designed loading, empty and error states.
+
+The Risk Map joins districts by state and name through
+`configs/district_aliases.yaml`, placing 99.3% of works; the rest are counted in
+a footnote. The proxy-label caveat and the 46% split-work weakness appear on
+every analytical page, read from the metrics rather than typed. Presentation
+mode now also masks private beneficiary names and phone numbers in descriptions
+(13,195 of 77,312 descriptions touched).
+
+Eight Playwright tests log in as each role, visit every page with no console
+errors, and check scoping: the Lucknow officer sees only Lucknow, an MP sees
+only their own constituency and no reviewer tools, and an out-of-scope work is
+a 404. The run writes 31 pseudonymised screenshots.

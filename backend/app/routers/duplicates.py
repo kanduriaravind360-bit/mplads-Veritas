@@ -11,6 +11,7 @@ from sqlalchemy.orm import aliased
 
 from backend.app import audit, models
 from backend.app.deps import Context, Page, context, page, reviewer
+from backend.app.redact import enabled as presentation_mode
 from backend.app.redact import redact_record
 from backend.app.schemas import PairDecisionRequest
 from backend.app.scoping import not_found
@@ -31,6 +32,20 @@ def _scoped_pairs(ctx: Context) -> Any:
     )
     stmt = ctx.scope.apply(stmt, a)
     return ctx.scope.apply(stmt, b)
+
+
+def _with_works(fields: dict[str, Any], a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """Attach both works. In presentation mode the shared words are limited to words
+    still visible in both masked descriptions, so a masked name cannot leak here."""
+    out = {**fields, "work_a": a, "work_b": b}
+    words = out.get("shared_location_words")
+    if presentation_mode() and words:
+        visible_a = set((a.get("work_description") or "").lower().split())
+        visible_b = set((b.get("work_description") or "").lower().split())
+        out["shared_location_words"] = " ".join(
+            w for w in str(words).split() if w.lower() in visible_a and w.lower() in visible_b
+        )
+    return out
 
 
 @router.get("")
@@ -62,11 +77,9 @@ def list_pairs(
         for w in ctx.db.execute(select(models.Work).where(models.Work.work_id.in_(ids))).scalars()
     }
     items = [
-        {
-            **_pair_fields(p),
-            "work_a": work_summary(works[p.work_id_a]),
-            "work_b": work_summary(works[p.work_id_b]),
-        }
+        _with_works(
+            _pair_fields(p), work_summary(works[p.work_id_a]), work_summary(works[p.work_id_b])
+        )
         for p in pairs
         if p.work_id_a in works and p.work_id_b in works
     ]
@@ -154,9 +167,7 @@ def get_pair(pair_id: int, ctx: Context = Depends(context)) -> dict[str, Any]:
     detail_a, detail_b = work_detail(a), work_detail(b)
     return redact_record(
         {
-            **_pair_fields(pair),
-            "work_a": detail_a,
-            "work_b": detail_b,
+            **_with_works(_pair_fields(pair), detail_a, detail_b),
             "diff": _word_diff(
                 detail_a.get("work_description") or "", detail_b.get("work_description") or ""
             ),

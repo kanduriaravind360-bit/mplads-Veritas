@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import case, func, select
 
-from backend.app import models, queries
+from backend.app import metrics_doc, models, queries
 from backend.app.deps import Context, Page, context, page
 from backend.app.serialize import work_summary
 from backend.app.settings import get_settings
@@ -15,6 +15,19 @@ from backend.app.settings import get_settings
 
 def _high_delay_risk() -> float:
     return float(get_settings().api["predictions"]["high_delay_risk"])
+
+
+def _delay_note(ctx: Context) -> str:
+    """Describe the model with its measured holdout AUC, read from metrics, never typed."""
+    doc = metrics_doc.metrics(ctx.db)
+    horizon = doc.get("delay_model", {}).get("horizon_days")
+    auc = doc.get("holdout_evaluation", {}).get("delay_model", {}).get("holdout", {}).get("roc_auc")
+    span = f"{horizon} days" if horizon else "the delay horizon"
+    measured = f", holdout ROC-AUC {float(auc):.3f}" if auc is not None else ""
+    return (
+        f"Probability of an open work running past {span} without completion "
+        f"(delay model{measured})."
+    )
 
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
@@ -64,7 +77,7 @@ def delay(
             "high_delay_risk_value": float(high[1]),
             "threshold": _high_delay_risk(),
         },
-        "note": "Probability of an open work running past a year without completion (delay model, holdout ROC-AUC 0.909).",
+        "note": _delay_note(ctx),
     }
 
 

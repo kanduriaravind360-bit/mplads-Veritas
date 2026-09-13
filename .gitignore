@@ -46,3 +46,10 @@ data/app/
 outbox/
 *.sqlite
 *.db
+
+# Frontend build and test output
+frontend/test-results/
+frontend/playwright-report/
+*.tsbuildinfo
+# Local editor and preview tooling
+.claude/
