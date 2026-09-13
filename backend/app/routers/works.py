@@ -189,6 +189,14 @@ def export_works(
     )
 
 
+@router.get("/{work_id:path}/counterfactual")
+def counterfactual(work_id: str, ctx: Context = Depends(context)) -> dict[str, Any]:
+    """What evidence would have to change for this work to leave the review queue."""
+    from backend.app.services.fusion import counterfactual as explain
+
+    return explain(ctx.db, get_scoped_work(ctx, work_id))
+
+
 @router.get("/{work_id:path}/peers")
 def peers(work_id: str, ctx: Context = Depends(context)) -> dict[str, Any]:
     """This work's cost against the same work type in the same state, and in its district."""

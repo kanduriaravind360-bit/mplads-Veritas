@@ -348,6 +348,31 @@ def per_stream_recall(
     return out
 
 
+_DETECTOR_NAMES = {
+    "split_group": "split-work",
+    "duplicate": "duplicate",
+    "inflated_cost": "cost",
+    "fast_complete": "fast-completion",
+}
+
+
+def _weakest_sentence(per_stream: dict[str, Any]) -> str | None:
+    """The plain-language weak spot, computed so it can never go stale.
+
+    "Weakest" is the lowest share of planted cases the detector flagged at all.
+    """
+    fired = {
+        k: v.get("detector_fired")
+        for k, v in per_stream.items()
+        if v.get("detector_fired") is not None
+    }
+    if not fired:
+        return None
+    kind = min(fired, key=lambda k: fired[k])
+    name = _DETECTOR_NAMES.get(kind, kind.replace("_", " "))
+    return f"The {name} detector is our weakest at {fired[kind]:.0%} and is the main open item."
+
+
 def run_injection_test(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     """Inject known anomalies, re-run the detectors, and measure recall."""
     cfg = cfg or load_config("ml")
@@ -398,9 +423,7 @@ def run_injection_test(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             "hits, so a genuine anomaly ranked high scores as a miss: treat these "
             "as a floor, bounded above by the plant rate, not as real precision."
         ),
-        "weakest_detector_plain_language": (
-            "The split-work detector is our weakest at 46% and is the main open item."
-        ),
+        "weakest_detector_plain_language": _weakest_sentence(per_stream),
         "global_rank_recall": per_type,
         "global_rank_recall_note": (
             "MISLEADING as a headline: it ranks every work on one global list, "

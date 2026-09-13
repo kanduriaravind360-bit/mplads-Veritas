@@ -164,3 +164,27 @@ def test_public_district_detail_hides_small_districts(client, monkeypatch) -> No
     body = client.get("/api/public/districts/PATNA").json()
     assert body["works"] == 3
     assert not (_all_keys(body) & _FORBIDDEN_KEYS)
+
+
+def test_public_districts_are_implementing_agencies(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from backend.app.routers import public
+
+    monkeypatch.setattr(public, "_min_works", lambda: 1)
+    rows = client.get("/api/public/districts").json()["districts"]
+    patna = next(r for r in rows if r["district"] == "PATNA")
+    assert patna["ida"].startswith("PATNA(") and patna["state"] == "Bihar"
+    body = client.get("/api/public/districts/PATNA", params={"ida": patna["ida"]}).json()
+    assert body["works"] == 3 and body["state"] == "Bihar"
+
+
+def test_weekly_digest_is_written_to_outbox(engine, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from backend.app import db as db_module
+    from backend.app import digest
+    from backend.app.scoping import Scope
+
+    monkeypatch.setattr(digest, "OUTBOX", tmp_path)
+    with db_module.session_factory()() as session:
+        path = digest.write(session, Scope(role="MINISTRY"))
+    text = path.read_text(encoding="utf-8")
+    assert path.parent == tmp_path and "Nothing here is a finding of fraud" in text
+    assert "Invented Member" not in text and "Invented Builders" not in text

@@ -69,6 +69,9 @@ scheduler:
   rescore_cron_hour: 2
   rescore_cron_minute: 0
   escalation_interval_minutes: 60
+  # Weekly digest written to outbox/ (never emailed).
+  digest_day_of_week: mon
+  digest_hour: 7
   # The nightly job re-runs the pipeline without the injection test.
   rescore_command: [python, -m, ml.train, --skip-injection]
 
@@ -113,3 +116,38 @@ public:
 # risk" on the Delays page, the MP Portfolio and the fund-lapse estimate.
 predictions:
   high_delay_risk: 0.7
+
+# Learning from reviewer verdicts (Learning page). Verdicts are split into a
+# learn and an evaluate partition by a hash of their id, so the panel reports
+# precision only on verdicts it did not learn from.
+learning:
+  learn_share: 0.7
+  # A channel counts as "active" on a verdict when its signal is at least this.
+  active_signal: 0.5
+  # Beta prior on each channel's precision: strength in pseudo-verdicts, centred
+  # on the overall confirmed rate, so a channel with few verdicts barely moves.
+  prior_strength: 20
+  # Learned weights stay within these multiples of the configured weights.
+  weight_multiplier: [0.5, 1.5]
+  # The re-ranker trains only once the learn partition has this many verdicts.
+  min_labels: 50
+  precision_at: 50
+  # Seeded demo verdicts. Positives are planted synthetic cases only; no real
+  # work is ever seeded as confirmed. Negatives are real alerts that match a
+  # documented benign pattern, applied by rule and labelled as such.
+  seed:
+    planted_bands: [High, Critical]
+    # Goods are delivered, so a purchase recorded complete within days is expected.
+    purchase_work_types:
+      - Furniture
+      - Computer / Smart Class
+      - Library / Books
+      - Ambulance / Vehicle
+      - Health Centre / Medical Equipment
+    # Catalogue items ordered in many places (configs/ml.yaml duplicates notes).
+    standard_item_duplicates: true
+    demo_false_positives:
+      - work_id: WS/MP18249/2025-2026/187617
+        reason: "CCTV for Bhatpara police station, wards 1-17. Its near-twin covers a different police station (Jagaddal) and wards 18-35, so the two are separate scopes. The cost flag compares a CCTV system with computers and smart classes, the type it was grouped under, and the description gives no camera count."
+      - work_id: WS/MP18249/2025-2026/187616
+        reason: "CCTV for Jagaddal police station, wards 18-35: the companion of the Bhatpara work for wards 1-17, not a duplicate of it. Same cost-model caveat: priced against computers and smart classes, with no camera count."

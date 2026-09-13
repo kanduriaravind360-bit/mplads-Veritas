@@ -41,6 +41,7 @@ _ROUTERS = (
     "admin",
     "search",
     "portfolio",
+    "learning",
 )
 
 

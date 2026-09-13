@@ -286,6 +286,27 @@ class Feedback(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class PlantedCase(Base):
+    """A synthetic anomaly from the injection test, with its fusion channels.
+
+    Known positives for the learning panel only. Kept out of the works table so
+    no dashboard, count, map or export can ever include one.
+    """
+
+    __tablename__ = "planted_cases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    planted_id: Mapped[str] = mapped_column(String(40), unique=True)
+    injection: Mapped[str] = mapped_column(String(30), index=True)
+    work_type: Mapped[str | None] = mapped_column(String(120))
+    signals: Mapped[dict] = mapped_column(JSON, default=dict)
+    base_risk_score: Mapped[float] = mapped_column(Float, default=0.0)
+    risk_score: Mapped[float] = mapped_column(Float, default=0.0)
+    band: Mapped[str] = mapped_column(String(10), index=True)
+    is_open: Mapped[bool] = mapped_column(Boolean, default=True)
+    partition: Mapped[str] = mapped_column(String(10), default="learn", index=True)
+
+
 class Case(Base):
     """An investigation case grouping related alerts (Phase D)."""
 

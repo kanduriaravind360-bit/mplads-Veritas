@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app import audit, models
+from backend.app.loader import partition_of
 from backend.app.scoping import MINISTRY, STATE, Scope, not_found
 from backend.app.settings import get_settings
 
@@ -152,6 +153,7 @@ def feedback(
         verdict=verdict,
         note=note,
         signals=signals,
+        partition=partition_of(alert.alert_id),
     )
     db.add(row)
     audit.append(

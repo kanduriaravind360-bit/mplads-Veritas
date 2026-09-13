@@ -98,6 +98,16 @@ def start_scheduler() -> BackgroundScheduler:
         id="nightly_rescore",
         replace_existing=True,
     )
+    from backend.app.digest import weekly_job
+
+    scheduler.add_job(
+        weekly_job,
+        "cron",
+        day_of_week=str(cfg["digest_day_of_week"]),
+        hour=int(cfg["digest_hour"]),
+        id="weekly_digest",
+        replace_existing=True,
+    )
     scheduler.start()
     _scheduler = scheduler
     return scheduler

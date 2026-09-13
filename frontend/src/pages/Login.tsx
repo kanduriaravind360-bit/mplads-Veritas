@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Building2, CheckCircle2, Landmark, Languages, Loader2, MapPinned, Shield, Users } from "lucide-react";
 import { ApiError } from "@/lib/api";
@@ -131,6 +131,12 @@ export default function LoginPage() {
             </div>
             <p className="mt-3 text-2xs text-muted">{t("login.demoNote")}</p>
           </Card>
+          <p className="mt-6 text-center text-sm text-muted">
+            {t("login.citizenPrompt")}{" "}
+            <Link to="/public" className="font-medium text-saffron-text hover:underline">
+              {t("nav.citizen")}
+            </Link>
+          </p>
         </div>
       </section>
     </div>

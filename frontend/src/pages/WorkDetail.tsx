@@ -8,7 +8,7 @@ import type { ModelsSummary, WorkDetail as Work } from "@/lib/types";
 import { alertTypeLabel, bandColor } from "@/lib/utils";
 import { Caveat } from "@/components/Caveat";
 import { BandBadge, Money, PanelSkeleton, QueryState, RiskDial } from "@/components/common";
-import { AttributionBars, AuditTimeline, Completeness, CostCheck, PeerChart, Reasons, RulesFired, Section, SignalBars } from "@/components/evidence";
+import { AttributionBars, AuditTimeline, Completeness, CostCheck, PeerChart, Reasons, RulesFired, Section, SignalBars, WhatWouldClear } from "@/components/evidence";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardBody, CardHeader } from "@/components/ui/primitives";
 
@@ -80,6 +80,12 @@ export default function WorkDetail() {
                   <CardBody className="space-y-5">
                     <CostCheck work={w} />
                     <PeerChart workId={w.work_id} />
+                  </CardBody>
+                </Card>
+                <Card>
+                  <CardHeader title={t("clear.title")} hint={t("clear.hint")} />
+                  <CardBody>
+                    <WhatWouldClear workId={w.work_id} />
                   </CardBody>
                 </Card>
                 <Card>

@@ -1,6 +1,10 @@
 import {
   Activity,
+  Banknote,
   BarChart3,
+  Briefcase,
+  GraduationCap,
+  SlidersHorizontal,
   Clock3,
   Copy,
   FileUp,
@@ -35,12 +39,14 @@ export const NAV: NavGroup[] = [
     items: [
       { to: "/", key: "command", icon: Gauge, keywords: "home dashboard kpi" },
       { to: "/map", key: "map", icon: Map, keywords: "district choropleth geography" },
+      { to: "/money", key: "money", icon: Banknote, keywords: "money at risk treemap value" },
     ],
   },
   {
     key: "review",
     items: [
       { to: "/alerts", key: "alerts", icon: Inbox, keywords: "queue review inbox" },
+      { to: "/cases", key: "cases", icon: Briefcase, roles: REVIEWERS, keywords: "investigation case brief pdf" },
       { to: "/duplicates", key: "duplicates", icon: Copy, keywords: "duplicate pairs split" },
       { to: "/network", key: "network", icon: Network, keywords: "vendor hhi benford concentration" },
     ],
@@ -61,6 +67,8 @@ export const NAV: NavGroup[] = [
     key: "system",
     items: [
       { to: "/models", key: "models", icon: Activity, keywords: "recall precision holdout metrics" },
+      { to: "/simulator", key: "simulator", icon: SlidersHorizontal, roles: REVIEWERS, keywords: "threshold weights what if" },
+      { to: "/learning", key: "learning", icon: GraduationCap, roles: REVIEWERS, keywords: "verdicts reranker feedback" },
       { to: "/ingest", key: "ingest", icon: FileUp, roles: REVIEWERS, keywords: "upload csv score" },
     ],
   },

@@ -11,7 +11,7 @@ import type { AlertDetail, AlertsSummary, AlertSummary, Band, Page } from "@/lib
 import { alertTypeLabel, BAND_ORDER, bandColor, cn } from "@/lib/utils";
 import { Caveat } from "@/components/Caveat";
 import { BandBadge, EmptyState, ErrorState, Money, PageHeader, PanelSkeleton, QueryState, RiskDial, useDebounced } from "@/components/common";
-import { AttributionBars, AuditTimeline, Completeness, CostCheck, PeerChart, Reasons, RulesFired, Section, SignalBars, WorksTable } from "@/components/evidence";
+import { AttributionBars, AuditTimeline, Completeness, CostCheck, PeerChart, Reasons, RulesFired, Section, SignalBars, WhatWouldClear, WorksTable } from "@/components/evidence";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, Input, Kbd, Segmented, Textarea } from "@/components/ui/primitives";
 import { Sheet } from "@/components/ui/overlay";
@@ -389,7 +389,13 @@ function AlertDrawer({ alertId, onClose }: { alertId: string; onClose: () => voi
                 tabs={[
                   { value: "explanation", label: t("alerts.explanation") },
                   { value: "evidence", label: t("alerts.evidence"), count: a.works.length },
-                  ...(work ? [{ value: "signals", label: t("alerts.signals") }, { value: "peers", label: t("alerts.peers") }] : []),
+                  ...(work
+                    ? [
+                        { value: "clear", label: t("clear.tab") },
+                        { value: "signals", label: t("alerts.signals") },
+                        { value: "peers", label: t("alerts.peers") },
+                      ]
+                    : []),
                   { value: "review", label: t("alerts.review"), count: a.comments.length + a.feedback.length || undefined },
                   { value: "audit", label: t("alerts.audit"), count: a.audit.length },
                 ]}
@@ -438,6 +444,11 @@ function AlertDrawer({ alertId, onClose }: { alertId: string; onClose: () => voi
 
                 {work ? (
                   <>
+                    <TabsContent value="clear">
+                      <Section title={t("clear.title")} hint={t("clear.hint")}>
+                        <WhatWouldClear workId={work.work_id} />
+                      </Section>
+                    </TabsContent>
                     <TabsContent value="signals" className="space-y-6">
                       <Section title={t("alerts.signalChannels")} hint={t("alerts.signalHint")}>
                         <SignalBars signals={work.signals} />

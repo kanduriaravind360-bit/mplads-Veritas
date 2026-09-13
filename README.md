@@ -63,6 +63,15 @@ Demo users, all with password `demo123`: `ministry@demo`, `state.up@demo`
 `PRESENTATION_MODE=1` for any screenshot, deck or public link: it replaces MP and
 vendor names with stable pseudonyms in every API response.
 
+Optional extras for the learning panel and the weekly digest:
+
+```bash
+python -m ml.planted                  # planted synthetic cases (about 3 minutes on GPU)
+python -m backend.app.loader          # loads them into their own table
+python -m backend.app.learning_seed   # rule-seeded demo verdicts; never "confirmed" on a real work
+python -m backend.app.digest          # writes outbox/digest-<date>-all-india.html
+```
+
 Start the dashboard (React, served on http://127.0.0.1:5173 with `/api` proxied
 to the API):
 
@@ -241,3 +250,25 @@ Eight Playwright tests log in as each role, visit every page with no console
 errors, and check scoping: the Lucknow officer sees only Lucknow, an MP sees
 only their own constituency and no reviewer tools, and an out-of-scope work is
 a 404. The run writes 31 pseudonymised screenshots.
+
+**Step 3d — review tools and learning.** Investigation cases group alerts,
+carry notes and a status, and print a PDF brief. "What would clear this" breaks
+a work's score into the evidence it rests on and states the check that would
+resolve each piece, such as "sanctioned amount at or below Rs 79.72 lakh
+against Rs 2.00 crore now". Money at Risk is a state and district treemap with
+denominators. The threshold simulator re-fuses the stored channels with the
+pipeline's own code. At the configured weights it reproduces every training
+score (largest difference 0.005, all bands identical), and a Reset restores
+them.
+
+Learning from reviewers uses 256 planted synthetic positives and 157 negatives
+seeded by documented benign rules: purchases completing quickly, catalogue-item
+duplicates, and the Bhatpara CCTV pair, whose two police stations and ward
+ranges differ. No real work is ever seeded as confirmed. On 110 held-back
+labels, precision at 50 is 0.94 with configured fusion and 0.96 after Bayesian
+re-weighting and after the logistic re-ranker, against a 0.64 base rate. That
+shows the mechanism working, not field precision, and the page says so.
+
+The public citizen view lists districts by implementing agency, with no scores,
+flags or work ids, and a weekly digest is written to `outbox/`. The anomaly time
+machine was not built. 11 end-to-end tests pass.

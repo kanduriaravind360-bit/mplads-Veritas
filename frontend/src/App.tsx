@@ -18,6 +18,13 @@ const Trends = lazy(() => import("@/pages/Trends"));
 const Portfolio = lazy(() => import("@/pages/Portfolio"));
 const ModelPerformance = lazy(() => import("@/pages/ModelPerformance"));
 const DataIngest = lazy(() => import("@/pages/DataIngest"));
+const Cases = lazy(() => import("@/pages/Cases"));
+const MoneyAtRisk = lazy(() => import("@/pages/MoneyAtRisk"));
+const Simulator = lazy(() => import("@/pages/Simulator"));
+const Learning = lazy(() => import("@/pages/Learning"));
+const CitizenView = lazy(() => import("@/pages/CitizenView"));
+
+const REVIEWERS: Role[] = ["MINISTRY", "STATE", "DISTRICT"];
 
 function RequireAuth({ children, roles }: { children: ReactNode; roles?: Role[] }) {
   const { user } = useAuth();
@@ -33,6 +40,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/public" element={page(<CitizenView />)} />
       <Route
         element={
           <RequireAuth>
@@ -42,6 +50,10 @@ export function App() {
       >
         <Route index element={page(<CommandCentre />)} />
         <Route path="map" element={page(<RiskMap />)} />
+        <Route path="money" element={page(<MoneyAtRisk />)} />
+        <Route path="cases" element={<RequireAuth roles={REVIEWERS}>{page(<Cases />)}</RequireAuth>} />
+        <Route path="simulator" element={<RequireAuth roles={REVIEWERS}>{page(<Simulator />)}</RequireAuth>} />
+        <Route path="learning" element={<RequireAuth roles={REVIEWERS}>{page(<Learning />)}</RequireAuth>} />
         <Route path="alerts" element={page(<AlertsInbox />)} />
         <Route path="works/*" element={page(<WorkDetail />)} />
         <Route path="duplicates" element={page(<DuplicateFinder />)} />
@@ -53,7 +65,7 @@ export function App() {
         <Route path="models" element={page(<ModelPerformance />)} />
         <Route
           path="ingest"
-          element={<RequireAuth roles={["MINISTRY", "STATE", "DISTRICT"]}>{page(<DataIngest />)}</RequireAuth>}
+          element={<RequireAuth roles={REVIEWERS}>{page(<DataIngest />)}</RequireAuth>}
         />
         <Route path="*" element={<EmptyState title="Page not found" body="Use the sidebar or press Ctrl K to search." />} />
       </Route>

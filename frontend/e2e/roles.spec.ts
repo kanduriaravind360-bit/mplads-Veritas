@@ -29,9 +29,9 @@ for (const role of Object.keys(ROLES) as RoleName[]) {
       for (const [index, spec] of PAGES.entries()) {
         await page.goto(spec.path);
         if (spec.reviewersOnly && role === "MP") {
-          // MPs do not review or upload: the route sends them home and the nav hides it.
+          // MPs do not review, upload or tune: the route sends them home and the nav hides it.
           await expect(page).toHaveURL(/\/$/);
-          await expect(page.getByRole("link", { name: "Data Ingest" })).toHaveCount(0);
+          await expect(page.locator(`nav a[href="${spec.path}"]`)).toHaveCount(0);
           continue;
         }
         if (spec.name === "mp-portfolio" && role !== "MP") {
@@ -113,6 +113,61 @@ test.describe("scoping", () => {
   });
 });
 
+test.describe("phase D", () => {
+  test("threshold simulator moves the queue and resets to the configured weights", async ({ page }) => {
+    const errors = watchConsole(page);
+    await login(page, "MINISTRY");
+    await page.goto("/simulator");
+    const results = page.getByTestId("sim-results");
+    await expect(results).toContainText("was");
+    await expect(results).toContainText("±0");
+
+    const rule = page.getByRole("slider", { name: "Rule layer" });
+    await rule.focus();
+    await page.keyboard.press("PageUp");
+    await page.keyboard.press("PageUp");
+    await expect(page.getByTestId("sim-reset")).toBeEnabled();
+    await expect(results).not.toContainText("±0 · was", { timeout: 30_000 });
+    await page.waitForLoadState("networkidle");
+    await shoot(page, "ministry-38-simulator-changed", false);
+
+    await page.getByTestId("sim-reset").click();
+    await expect(page.getByTestId("sim-reset")).toBeDisabled();
+    await expect(results).toContainText("±0", { timeout: 30_000 });
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  test("citizen view needs no login and shows no per-work risk", async ({ page }) => {
+    const errors = watchConsole(page);
+    await page.goto("/public");
+    await page.getByTestId("citizen-districts").getByRole("button").first().waitFor();
+    await page.getByTestId("citizen-districts").getByRole("button").first().click();
+    await page.getByTestId("citizen-district").waitFor();
+    await page.waitForLoadState("networkidle");
+    // No band labels, scores or work ids anywhere on the page.
+    const text = await page.locator("body").innerText();
+    for (const forbidden of ["Critical", "High-risk", "risk score", "WS/MP"]) {
+      expect(text.includes(forbidden), forbidden).toBe(false);
+    }
+    await shoot(page, "public-01-citizen-view", false);
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  test("learning panel states its caveat and cases open a brief-ready case", async ({ page }) => {
+    await login(page, "MINISTRY");
+    await page.goto("/learning");
+    await expect(page.getByTestId("learning-caveat")).toContainText("not precision in the field");
+    await page.goto("/cases");
+    await settle(page, '[data-testid="case-list"], [data-testid="empty-state"]');
+    if (await page.getByTestId("case-list").count()) {
+      await page.getByTestId("case-list").getByRole("button").first().click();
+      await page.getByTestId("case-detail").waitFor();
+      await page.waitForLoadState("networkidle");
+      await shoot(page, "ministry-39-case-detail", false);
+    }
+  });
+});
+
 test.describe("ministry walkthrough shots", () => {
   test("login, drawer, work detail, keyboard triage, Hindi and light theme", async ({ page }) => {
     const errors = watchConsole(page);
@@ -136,35 +191,42 @@ test.describe("ministry walkthrough shots", () => {
     await page.goto(`/alerts?id=${encodeURIComponent("WS/MP18249/2025-2026/187617")}`);
     await page.getByTestId("suggested-action").waitFor();
     await page.waitForTimeout(600);
-    await shoot(page, "ministry-12-alert-drawer", false);
+    await shoot(page, "ministry-30-alert-drawer", false);
     await page.getByRole("tab", { name: "Signals" }).click();
     await page.getByTestId("signal-bars").waitFor();
-    await shoot(page, "ministry-13-alert-signals", false);
+    await shoot(page, "ministry-31-alert-signals", false);
     await page.getByRole("tab", { name: "Peers" }).click();
     await page.getByTestId("peer-chart").waitFor();
-    await shoot(page, "ministry-14-alert-peers", false);
+    await shoot(page, "ministry-32-alert-peers", false);
 
     await page.goto("/works/WS/MP18249/2025-2026/187617");
     await settle(page, '[data-testid="work-title"]');
-    await shoot(page, "ministry-15-work-detail");
+    await shoot(page, "ministry-33-work-detail");
 
     await page.goto("/duplicates?tab=splits");
     await page.getByTestId("split-weakness").waitFor();
-    await shoot(page, "ministry-16-split-groups", false);
+    await shoot(page, "ministry-34-split-groups", false);
 
-    // Hindi.
-    await page.getByRole("button", { name: "Switch language" }).click();
+    // "What would clear this" on the top alert.
+    await page.goto(`/alerts?id=${encodeURIComponent("WS/MP092/2026-2027/305015")}`);
+    await page.getByRole("tab", { name: "What would clear this" }).click();
+    await page.getByTestId("what-would-clear").waitFor();
+    await page.waitForTimeout(500);
+    await shoot(page, "ministry-37-what-would-clear", false);
+
+    // Hindi. Go home first: the alert drawer would cover the header buttons.
     await page.goto("/");
     await settle(page, '[data-testid="kpis"]');
+    await page.getByRole("button", { name: "Switch language" }).click();
     await expect(page.getByRole("heading", { name: "कमांड सेंटर" })).toBeVisible();
-    await shoot(page, "ministry-17-command-centre-hindi", false);
+    await shoot(page, "ministry-35-command-centre-hindi", false);
     await page.getByRole("button", { name: "Switch language" }).click();
 
     // Light theme.
     await page.getByRole("button", { name: "Toggle theme" }).click();
     await page.goto("/");
     await settle(page, '[data-testid="kpis"]');
-    await shoot(page, "ministry-18-command-centre-light", false);
+    await shoot(page, "ministry-36-command-centre-light", false);
     await page.getByRole("button", { name: "Toggle theme" }).click();
 
     expect(errors, errors.join("\n")).toEqual([]);

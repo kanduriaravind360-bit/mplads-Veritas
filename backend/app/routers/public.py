@@ -65,18 +65,31 @@ def search_districts(
     state: str | None = Query(default=None, max_length=80),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
+    """Districts, one per implementing agency.
+
+    The ``state`` column is the recommending MP's state, and a Rajya Sabha member
+    can fund works in another state, so grouping by (district, state) listed
+    Agra under four states. The implementing agency is the district's own office,
+    so it is the right unit; its state is where most of its works sit.
+    """
     stmt = (
-        select(models.Work.district, models.Work.state, func.count())
+        select(models.Work.ida, models.Work.district, models.Work.state, func.count())
         .where(models.Work.source != "ingest", models.Work.district != "")
-        .group_by(models.Work.district, models.Work.state)
-        .having(func.count() >= _min_works())
-        .order_by(models.Work.district)
+        .group_by(models.Work.ida, models.Work.district, models.Work.state)
     )
     if q:
         stmt = stmt.where(models.Work.district.ilike(f"%{q.strip()}%"))
-    if state:
-        stmt = stmt.where(models.Work.state == state)
-    rows = db.execute(stmt.limit(limit)).all()
+    agencies: dict[str, dict[str, Any]] = {}
+    for ida, name, st, n in db.execute(stmt).all():
+        entry = agencies.setdefault(ida, {"ida": ida, "district": name, "works": 0, "_states": {}})
+        entry["works"] += int(n)
+        entry["_states"][st] = entry["_states"].get(st, 0) + int(n)
+    rows = []
+    for entry in agencies.values():
+        entry["state"] = max(entry.pop("_states").items(), key=lambda kv: kv[1])[0]
+        if entry["works"] >= _min_works() and (not state or entry["state"] == state):
+            rows.append(entry)
+    rows.sort(key=lambda r: (r["district"], r["state"] or ""))
     states = [
         s
         for (s,) in db.execute(
@@ -84,17 +97,20 @@ def search_districts(
         ).all()
         if s
     ]
-    return {
-        "districts": [{"district": d, "state": s, "works": int(n)} for d, s, n in rows],
-        "states": states,
-        "note": NOTE,
-    }
+    return {"districts": rows[:limit], "states": states, "note": NOTE}
 
 
 @router.get("/districts/{district}")
-def district(district: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+def district(
+    district: str,
+    db: Session = Depends(get_db),
+    ida: str | None = Query(default=None, max_length=300),
+) -> dict[str, Any]:
     name = district.strip().upper()
     base = [models.Work.district == name, models.Work.source != "ingest"]
+    # District names repeat across states; the implementing agency is unique.
+    if ida:
+        base.append(models.Work.ida == ida)
     row = db.execute(
         select(
             func.count(),
@@ -107,6 +123,13 @@ def district(district: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     works = int(row[0] or 0)
     if works < _min_works():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "district not found or too small to publish")
+    majority_state = db.execute(
+        select(models.Work.state)
+        .where(*base)
+        .group_by(models.Work.state)
+        .order_by(func.count().desc())
+        .limit(1)
+    ).scalar_one_or_none()
 
     types = db.execute(
         select(
@@ -131,7 +154,7 @@ def district(district: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     ).all()
     return {
         "district": name,
-        "state": row[4],
+        "state": majority_state,
         "works": works,
         "sanctioned": float(row[1]),
         "disbursed": float(row[2]),

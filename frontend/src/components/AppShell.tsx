@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { ChevronsLeft, ChevronsRight, Command as CommandIcon, Languages, LogOut, Moon, Search, Shield, Sun } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, Command as CommandIcon, Globe2, Languages, LogOut, Moon, Search, Shield, Sun } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { setLang, useLang } from "@/lib/i18n";
 import { useApi } from "@/lib/query";
@@ -108,7 +108,13 @@ export function AppShell() {
             </div>
           ))}
         </nav>
-        <div className="border-t border-line p-3">
+        <div className="space-y-1 border-t border-line p-3">
+          <Button asChild variant="ghost" size="sm" className={cn("w-full", collapsed ? "justify-center" : "justify-start")}>
+            <NavLink to="/public" aria-label={t("nav.citizen")}>
+              <Globe2 />
+              {!collapsed ? t("nav.citizen") : null}
+            </NavLink>
+          </Button>
           <Button
             variant="ghost"
             size="sm"

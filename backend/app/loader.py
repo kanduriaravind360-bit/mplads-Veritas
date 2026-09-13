@@ -31,7 +31,8 @@ from sqlalchemy.orm import Session
 from backend.app import models
 from backend.app.db import Base, get_engine, session_scope
 from backend.app.geo import district_from_ida, mp_code_from_work_id
-from backend.app.settings import PROJECT_ROOT
+from backend.app.settings import PROJECT_ROOT, get_settings
+from ml.config import load_config, resolve
 
 PROCESSED = PROJECT_ROOT / "data" / "processed"
 METRICS = PROJECT_ROOT / "models" / "metrics.json"
@@ -487,6 +488,41 @@ def load_metrics(db: Session) -> None:
     db.flush()
 
 
+def partition_of(key: str) -> str:
+    """Deterministic learn/evaluate split, so a verdict never switches sides."""
+    share = float(get_settings().api["learning"]["learn_share"])
+    bucket = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16) % 1000
+    return "learn" if bucket < share * 1000 else "evaluate"
+
+
+def load_planted(db: Session) -> int:
+    """Planted synthetic cases for the learning panel, if ``python -m ml.planted`` has run."""
+    path = resolve(load_config("ml")["paths"]["planted_scored"])
+    if not path.exists():
+        return 0
+    frame = pd.read_parquet(path)
+    db.execute(delete(models.PlantedCase))
+    from ml.risk import _SIGNALS
+
+    rows = [
+        {
+            "planted_id": str(rec["work_id"]),
+            "injection": str(rec["injection"]),
+            "work_type": _clean(rec.get("work_type")),
+            "signals": {name: float(_clean(rec.get(name)) or 0.0) for name in _SIGNALS},
+            "base_risk_score": float(_clean(rec.get("base_risk_score")) or 0.0),
+            "risk_score": float(_clean(rec.get("risk_score")) or 0.0),
+            "band": str(rec.get("band")),
+            "is_open": bool(rec.get("is_open", True)),
+            "partition": partition_of(str(rec["work_id"])),
+        }
+        for rec in frame.to_dict("records")
+    ]
+    for chunk in _chunks(rows):
+        db.execute(insert(models.PlantedCase), chunk)
+    return len(rows)
+
+
 def run(kind: str = "initial_load", reset: bool = False) -> dict[str, Any]:
     """Load everything. Returns a summary."""
     engine = get_engine()
@@ -504,6 +540,7 @@ def run(kind: str = "initial_load", reset: bool = False) -> dict[str, Any]:
         pairs = load_duplicate_pairs(db, lookup)
         groups = load_split_groups(db, lookup)
         load_metrics(db)
+        planted = load_planted(db)
 
         from backend.app.seed import ensure_demo_users
 
@@ -522,6 +559,7 @@ def run(kind: str = "initial_load", reset: bool = False) -> dict[str, Any]:
             "alerts_retired": retired,
             "duplicate_pairs": pairs,
             "split_groups": groups,
+            "planted_cases": planted,
             "demo_users": users,
         }
 

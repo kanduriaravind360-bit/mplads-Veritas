@@ -354,3 +354,102 @@ export function WorksTable({ works, onOpen }: { works: WorkSummary[]; onOpen?: (
     </div>
   );
 }
+
+// ------------------------------------------------------------------ counterfactual
+
+interface Counterfactual {
+  work_id: string;
+  in_queue: boolean;
+  risk_score: number;
+  base_risk_score: number;
+  band: string;
+  queue_cutoff: number;
+  channels: {
+    channel: keyof Signals;
+    signal: number;
+    contribution: number;
+    score_without: number;
+    clears_alone: boolean;
+    signal_needed: number | null;
+    condition: { en: string; hi: string };
+  }[];
+  minimal_set: (keyof Signals)[];
+  score_after_minimal: number;
+  severe_rules: string[];
+  severe_note: string | null;
+  rules: { rule: string; en: string; hi: string }[];
+  note: string;
+}
+
+/** "What would clear this": the evidence a score rests on, stated as checks. */
+export function WhatWouldClear({ workId }: { workId: string }) {
+  const { t, lang } = useLang();
+  const query = useApi<Counterfactual>(`/works/${idPath(workId)}/counterfactual`, undefined, { placeholderData: undefined });
+  return (
+    <QueryState query={query} skeleton={<PanelSkeleton rows={5} className="p-0" />}>
+      {(c) => {
+        const maxContribution = Math.max(...c.channels.map((ch) => ch.contribution), 1e-9);
+        return (
+          <div className="space-y-5" data-testid="what-would-clear">
+            <div className="rounded-lg border border-line bg-bg/40 p-4 text-sm">
+              {c.in_queue ? (
+                <>
+                  <p>
+                    {t("clear.inQueue", { score: c.risk_score.toFixed(1), cutoff: c.queue_cutoff.toFixed(1) })}
+                  </p>
+                  {c.minimal_set.length ? (
+                    <p className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="text-muted">{t("clear.minimal")}</span>
+                      {c.minimal_set.map((ch) => (
+                        <Badge key={ch} tone="saffron">{CHANNEL_LABELS[ch]}</Badge>
+                      ))}
+                      <span className="text-muted">→</span>
+                      <span className="num font-semibold">{c.score_after_minimal.toFixed(1)}</span>
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p>{t("clear.notInQueue", { score: c.risk_score.toFixed(1), cutoff: c.queue_cutoff.toFixed(1) })}</p>
+              )}
+              {c.severe_note ? (
+                <p className="mt-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-ink">
+                  {c.severe_note} ({c.severe_rules.join(", ").replace(/_/g, " ")})
+                </p>
+              ) : null}
+            </div>
+
+            <ul className="space-y-2">
+              {c.channels.map((ch) => (
+                <li key={ch.channel} className="rounded-md border border-line p-3">
+                  <div className="grid grid-cols-[10rem_1fr_auto] items-center gap-3 text-sm">
+                    <span className="font-medium">{CHANNEL_LABELS[ch.channel]}</span>
+                    <div className="h-2 rounded-full bg-raised">
+                      <div className="h-full rounded-full bg-saffron" style={{ width: `${(ch.contribution / maxContribution) * 100}%` }} />
+                    </div>
+                    <span className="flex items-center gap-2 text-xs">
+                      <span className="num text-muted">{t("clear.without", { score: ch.score_without.toFixed(1) })}</span>
+                      {ch.clears_alone && !c.severe_rules.length ? <Badge tone="ok">{t("clear.alone")}</Badge> : null}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm text-muted">{lang === "hi" ? ch.condition.hi : ch.condition.en}</p>
+                </li>
+              ))}
+            </ul>
+
+            {c.rules.length ? (
+              <div>
+                <div className="eyebrow mb-2">{t("alerts.rulesFired")}</div>
+                <ul className="list-disc space-y-1 pl-5 text-sm text-muted">
+                  {c.rules.map((r) => (
+                    <li key={r.rule}>{lang === "hi" ? r.hi : r.en}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <p className="text-2xs text-faint">{c.note}</p>
+          </div>
+        );
+      }}
+    </QueryState>
+  );
+}

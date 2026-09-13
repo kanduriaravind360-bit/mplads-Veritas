@@ -20,6 +20,8 @@ paths:
   split_groups: data/processed/split_groups.parquet
   duplicate_pairs: data/processed/duplicate_pairs.parquet
   holdout_scored: data/processed/holdout_scored.parquet
+  # Planted synthetic cases with their fusion channels, for the learning panel.
+  planted_scored: data/processed/planted_scored.parquet
   alerts: data/processed/alerts.parquet
   rollup_state: data/processed/rollup_state.parquet
   rollup_ida: data/processed/rollup_ida.parquet

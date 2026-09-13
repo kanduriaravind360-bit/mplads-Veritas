@@ -251,3 +251,48 @@ bands:
   Critical:
     en: "Critical"
     hi: "अति गंभीर"
+
+# --- Counterfactuals: "what would clear this" --------------------------------
+# What evidence would have to change for a work to leave the review queue. These
+# describe checks a reviewer or agency could complete; they never say what "should"
+# have been sanctioned. Placeholders: {amount}, {target}, {days}, {pair}, {stage}.
+counterfactual:
+  cost:
+    en: "Sanctioned amount at or below {target} against {amount} now, or an estimate showing why this work costs more than its description predicts"
+    hi: "स्वीकृत राशि {target} या उससे कम (अभी {amount}), या ऐसा अनुमान जो बताए कि यह कार्य विवरण से अनुमानित लागत से अधिक क्यों है"
+  cost_general:
+    en: "Documentation showing why the cost is above peers of this type"
+    hi: "दस्तावेज़ जो बताए कि लागत इस प्रकार के समकक्षों से अधिक क्यों है"
+  duplicate:
+    en: "A reviewer records that {pair} is a separate asset, not a duplicate"
+    hi: "समीक्षक दर्ज करे कि {pair} एक अलग परिसंपत्ति है, द्विप्रति नहीं"
+  split:
+    en: "The group is confirmed as separate projects, each sanctioned on its own merits"
+    hi: "समूह की पुष्टि अलग-अलग परियोजनाओं के रूप में हो, प्रत्येक अपने आधार पर स्वीकृत"
+  delay:
+    en: "A completion date or a revised schedule is recorded for the work"
+    hi: "कार्य की पूर्णता तिथि या संशोधित समय-सारिणी दर्ज हो"
+  model:
+    en: "No single field: this channel reflects the work's combined profile and falls as the other evidence is resolved"
+    hi: "कोई एकल फ़ील्ड नहीं: यह चैनल कार्य की समग्र प्रोफ़ाइल दर्शाता है और अन्य साक्ष्य हल होने पर घटता है"
+  rule_sanction_delay:
+    en: "Recommendation-to-sanction time within {days} days, or the reason for the delay on record"
+    hi: "संस्तुति से स्वीकृति का समय {days} दिनों के भीतर, या देरी का कारण दर्ज हो"
+  rule_stuck_work:
+    en: "The work moves past the '{stage}' stage, or a reason for the hold is on record"
+    hi: "कार्य '{stage}' चरण से आगे बढ़े, या रुकावट का कारण दर्ज हो"
+  rule_cost_outlier:
+    en: "Cost within the normal range for its peer group, or a costing that explains the difference"
+    hi: "लागत अपने समकक्ष समूह की सामान्य सीमा में हो, या अंतर समझाने वाला लागत-विवरण"
+  rule_fast_completion:
+    en: "Physical verification that the work was completed, since {days} days or less is unusual for this type"
+    hi: "कार्य पूर्ण होने का भौतिक सत्यापन, क्योंकि इस प्रकार के लिए {days} दिन या कम असामान्य है"
+  rule_round_amount:
+    en: "An itemised estimate behind the round figure"
+    hi: "गोल राशि के पीछे मदवार अनुमान"
+  rule_vendor_concentration:
+    en: "Evidence of open tendering for this vendor's works in the district"
+    hi: "ज़िले में इस विक्रेता के कार्यों के लिए खुली निविदा का साक्ष्य"
+  rule_payment_stuck:
+    en: "The pending payment is released or its hold explained"
+    hi: "लंबित भुगतान जारी हो या रोक का कारण बताया जाए"

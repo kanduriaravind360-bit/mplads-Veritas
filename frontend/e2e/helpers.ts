@@ -23,7 +23,9 @@ export interface PageSpec {
 export const PAGES: PageSpec[] = [
   { path: "/", name: "command-centre", ready: '[data-testid="kpis"]' },
   { path: "/map", name: "risk-map", ready: '[data-testid="map-coverage"]:has-text("works")' },
+  { path: "/money", name: "money-at-risk", ready: '[data-testid="money-treemap"], [data-testid="empty-state"]' },
   { path: "/alerts", name: "alerts-inbox", ready: '[data-testid="alerts-total"]:has-text("of")' },
+  { path: "/cases", name: "cases", ready: '[data-testid="case-list"], [data-testid="empty-state"]', reviewersOnly: true },
   { path: "/duplicates", name: "duplicate-finder", ready: '[data-testid="pairs-total"]:has-text("of")' },
   { path: "/network", name: "vendor-network", ready: '[data-testid="benford"]' },
   { path: "/delays", name: "delays", ready: '[data-testid="delay-table"], [data-testid="empty-state"]' },
@@ -31,6 +33,8 @@ export const PAGES: PageSpec[] = [
   { path: "/trends", name: "trends", ready: '[data-testid="cost-distribution"], [data-testid="empty-state"]' },
   { path: "/portfolio", name: "mp-portfolio", ready: '[data-testid="portfolio-framing"]' },
   { path: "/models", name: "model-performance", ready: '[data-testid="detector-table"]' },
+  { path: "/simulator", name: "threshold-simulator", ready: '[data-testid="sim-results"]:has-text("was")', reviewersOnly: true },
+  { path: "/learning", name: "learning", ready: '[data-testid="learning-channels"], [data-testid="empty-state"]', reviewersOnly: true },
   { path: "/ingest", name: "data-ingest", ready: '[data-testid="dropzone"]', reviewersOnly: true },
 ];
 
