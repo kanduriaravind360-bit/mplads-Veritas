@@ -277,10 +277,23 @@ export class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: s
   }
 
   render() {
-    if (this.state.error) {
+    const { error } = this.state;
+    if (error) {
+      // After a redeploy, an open tab asks for chunk files that no longer exist.
+      const staleBundle = /dynamically imported module|Loading chunk|Importing a module script failed/i.test(error.message);
       return (
         <Card className="mx-auto mt-12 max-w-lg">
-          <ErrorState error={this.state.error} onRetry={() => this.setState({ error: null })} />
+          {staleBundle ? (
+            <div role="alert" className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+              <div className="font-medium">A newer version of the dashboard is available</div>
+              <div className="text-sm text-muted">Reload to continue; nothing you saved is lost.</div>
+              <Button variant="primary" size="sm" onClick={() => window.location.reload()}>
+                <RefreshCw /> Reload
+              </Button>
+            </div>
+          ) : (
+            <ErrorState error={error} onRetry={() => this.setState({ error: null })} />
+          )}
         </Card>
       );
     }

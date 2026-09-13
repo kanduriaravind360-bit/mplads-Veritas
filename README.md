@@ -13,10 +13,25 @@ District Authorities and Members of Parliament. Everything it surfaces is a
 the implementation risk of works recommended in a constituency, never a
 judgement of the MP.
 
+## Quick start (demo)
+
+On Windows, after the setup below, one command builds whatever is missing, loads
+the database, guarantees the demo scenarios, and starts the API and dashboard:
+
+```bash
+powershell -ExecutionPolicy Bypass -File demo.ps1
+```
+
+It opens http://127.0.0.1:4173 with names pseudonymised (`-RealNames` turns that
+off, for private screens only). `-Smoke` starts everything, checks a real login
+through the dashboard's proxy, then stops. On Linux or macOS, `make demo` runs
+the same steps. `docker compose up --build` is provided but **untested**: Docker
+is not installed on the build machine, so `demo.ps1` is the verified path.
+
 ## Setup
 
-Requires Python 3.12, [uv](https://docs.astral.sh/uv/), and Node.js LTS (for the
-frontend from step 4 onward).
+Requires Python 3.12, [uv](https://docs.astral.sh/uv/), and Node.js 20 or later
+for the dashboard.
 
 ```bash
 uv venv --python 3.12 .venv
@@ -272,3 +287,23 @@ shows the mechanism working, not field precision, and the page says so.
 The public citizen view lists districts by implementing agency, with no scores,
 flags or work ids, and a weekly digest is written to `outbox/`. The anomaly time
 machine was not built. 11 end-to-end tests pass.
+
+**Step 3e — demo path and hardening.** `demo.ps1` is the verified one-command
+demo, and its `-Smoke` run signs in through the dashboard proxy and sees 77,312
+works. `python -m backend.app.demo_seed` guarantees the three demo scenarios
+from loaded data:
+
+- the Madurai split-work case (12 works, Rs 1.19 crore)
+- the Bhatpara CCTV alerts, reset to Open on the audit trail
+- Bokaro, whose 450 open works all sit above the delay threshold
+
+It exits non-zero if any scenario is missing, rather than drifting.
+
+A Makefile, docker-compose, Dockerfiles and `.env.example` are included and
+untested. `pyproject.toml` now declares the packages the API had only been
+installed with (PyJWT, APScheduler, fpdf2), so a fresh clone installs cleanly.
+
+Unhandled server errors return a reference ID instead of a traceback. The
+dashboard shows a banner when the API is unreachable and a reload prompt for a
+stale bundle, and two new end-to-end tests break the API in the browser and
+watch it recover.

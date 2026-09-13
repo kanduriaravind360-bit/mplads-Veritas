@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { ChevronsLeft, ChevronsRight, Command as CommandIcon, Globe2, Languages, LogOut, Moon, Search, Shield, Sun } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, Command as CommandIcon, Globe2, Languages, LogOut, Moon, Search, Shield, Sun, WifiOff } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { setLang, useLang } from "@/lib/i18n";
 import { useApi } from "@/lib/query";
@@ -28,7 +28,14 @@ export function AppShell() {
       return false;
     }
   });
-  const health = useApi<{ ok: boolean; presentation_mode: boolean }>("/health", undefined, { staleTime: Infinity });
+  // Polled, so a dropped API shows a banner instead of a page of silent spinners.
+  const health = useApi<{ ok: boolean; presentation_mode: boolean }>("/health", undefined, {
+    staleTime: 20_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+    retry: 1,
+  });
+  const apiDown = health.isError;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -172,6 +179,15 @@ export function AppShell() {
             </Tip>
           </div>
         </header>
+        {apiDown ? (
+          <div role="status" className="flex items-center gap-3 border-b border-danger/30 bg-danger/10 px-6 py-2 text-sm text-ink" data-testid="api-down">
+            <WifiOff className="size-4 text-danger" />
+            <span>{t("states.offline")}</span>
+            <Button variant="outline" size="sm" className="ml-auto" onClick={() => void health.refetch()}>
+              {t("common.retry")}
+            </Button>
+          </div>
+        ) : null}
         <main id="main" className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[1680px] px-8 py-8">
             <ErrorBoundary resetKey={location.pathname}>

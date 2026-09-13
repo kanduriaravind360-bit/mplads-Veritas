@@ -1,0 +1,62 @@
+# MPLADS Sentinel in containers: API + dashboard (nginx) + Postgres.
+#
+# UNTESTED: Docker is not installed on the build machine; demo.ps1 is the
+# verified path. The pipeline is not run inside the containers: run
+# `python -m ml.train` on a machine with the data first, then mount its
+# outputs (data/processed, models) read-only.
+#
+#   cp .env.example .env    # set JWT_SECRET and POSTGRES_PASSWORD
+#   docker compose up --build
+#   docker compose exec api python -m backend.app.loader
+#   docker compose exec api python -m backend.app.demo_seed --reset
+#
+# Dashboard on http://localhost:8080.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sentinel
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel -d sentinel"]
+      interval: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/api.Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://sentinel:${POSTGRES_PASSWORD}@db:5432/sentinel
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      PRESENTATION_MODE: ${PRESENTATION_MODE:-1}
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-0}
+      CORS_ORIGINS: http://localhost:8080
+    volumes:
+      - ./data/processed:/app/data/processed:ro
+      - ./models:/app/models:ro
+      - ./outbox:/app/outbox
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 10s
+      retries: 30
+
+  web:
+    build:
+      context: frontend
+      dockerfile: ../deploy/web.Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:

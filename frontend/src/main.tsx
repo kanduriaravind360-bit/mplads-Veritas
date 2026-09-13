@@ -14,6 +14,7 @@ import { queryClient } from "@/lib/query";
 import { AuthProvider } from "@/lib/auth";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toast";
+import { ErrorBoundary } from "@/components/common";
 import { App } from "@/App";
 
 const root = document.getElementById("root");
@@ -26,7 +27,9 @@ createRoot(root).render(
         <AuthProvider>
           <TooltipProvider>
             <Toaster>
-              <App />
+              <ErrorBoundary>
+                <App />
+              </ErrorBoundary>
             </Toaster>
           </TooltipProvider>
         </AuthProvider>

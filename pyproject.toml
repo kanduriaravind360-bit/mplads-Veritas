@@ -43,12 +43,27 @@ dependencies = [
     "sqlalchemy==2.0.36",
     "pydantic==2.10.4",
     "python-multipart==0.0.20",
+    # Pure-Python choices, so Smart App Control has no new compiled DLL to block:
+    # PyJWT instead of python-jose, stdlib PBKDF2 instead of bcrypt.
+    "pyjwt==2.10.1",
+    "apscheduler==3.10.4",
+    "fpdf2==2.8.2",
 ]
 
 [project.optional-dependencies]
+# Postgres driver for deployments (DATABASE_URL=postgresql+psycopg://...). Not
+# installed locally: SQLite is the default and needs nothing extra.
+postgres = ["psycopg[binary]==3.2.3"]
 dev = [
     "pytest==8.3.4",
     "ruff==0.9.2",
+    # FastAPI's TestClient, and the screenshot scripts.
+    "httpx==0.28.1",
+    "playwright==1.49.1",
+    # PowerPoint deck builder (presentation/build_deck.py). lxml pinned to a build
+    # verified to load under Smart App Control.
+    "python-pptx==1.0.2",
+    "lxml==5.3.0",
     # Temporary hackathon demo app (demo_app.py); the React dashboard replaces it.
     "streamlit==1.41.1",
     "plotly==5.24.1",

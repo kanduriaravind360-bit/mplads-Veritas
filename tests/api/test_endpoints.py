@@ -188,3 +188,18 @@ def test_weekly_digest_is_written_to_outbox(engine, tmp_path, monkeypatch) -> No
     text = path.read_text(encoding="utf-8")
     assert path.parent == tmp_path and "Nothing here is a finding of fraud" in text
     assert "Invented Member" not in text and "Invented Builders" not in text
+
+
+def test_unhandled_errors_return_a_reference_not_a_traceback(client, auth, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from backend.app import queries
+
+    def boom(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("internal detail that must not leak")
+
+    monkeypatch.setattr(queries, "totals", boom)
+    safe_client = type(client)(client.app, raise_server_exceptions=False)
+    response = safe_client.get("/api/overview", headers=auth("ministry"))
+    assert response.status_code == 500
+    body = response.json()
+    assert "Reference" in body["detail"] and "internal detail" not in body["detail"]
+    assert response.headers["X-Request-ID"] in body["detail"]

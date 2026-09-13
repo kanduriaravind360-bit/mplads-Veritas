@@ -112,6 +112,21 @@ public:
   # The citizen view never shows per-work risk, and never names an MP or vendor.
   min_works_to_show_district: 5
 
+# The guaranteed demo path (python -m backend.app.demo_seed). Each scenario is
+# looked up in the loaded data, never invented; the seed fails loudly if one is
+# missing, so a demo cannot silently fall back to something else.
+demo:
+  # A split-work case, opened in advance so the Cases page has a worked example.
+  split_case:
+    district: MADURAI
+    work_type: Road / Pavement
+  # The live false-positive walkthrough: reset to Open before each demo.
+  false_positive_alerts:
+    - WS/MP18249/2025-2026/187617
+    - WS/MP18249/2025-2026/187616
+  # The delay story: a district with many open works and a high delay probability.
+  high_delay_district: BOKARO
+
 # An open work at or above this predicted delay probability counts as "high delay
 # risk" on the Delays page, the MP Portfolio and the fund-lapse estimate.
 predictions:

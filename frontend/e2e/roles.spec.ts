@@ -168,6 +168,36 @@ test.describe("phase D", () => {
   });
 });
 
+test.describe("resilience", () => {
+  test("a failing API shows a designed error, retries, and recovers", async ({ page }) => {
+    await login(page, "MINISTRY");
+    // Break the overview endpoint and the health check.
+    await page.route("**/api/overview", (route) => route.fulfill({ status: 503, body: JSON.stringify({ detail: "Service briefly unavailable" }), contentType: "application/json" }));
+    await page.route("**/api/health", (route) => route.abort("connectionrefused"));
+    await page.goto("/");
+    await expect(page.getByText("This view could not load")).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByTestId("api-down")).toBeVisible({ timeout: 45_000 });
+    await shoot(page, "resilience-01-api-error", false);
+
+    await page.unroute("**/api/overview");
+    await page.unroute("**/api/health");
+    await page.locator("main").getByRole("button", { name: "Try again" }).first().click();
+    await expect(page.getByTestId("kpis")).toBeVisible({ timeout: 45_000 });
+    await page.getByTestId("api-down").getByRole("button").click();
+    await expect(page.getByTestId("api-down")).toHaveCount(0, { timeout: 30_000 });
+  });
+
+  test("unknown routes and an expired session are handled", async ({ page }) => {
+    await login(page, "MINISTRY");
+    await page.goto("/no-such-page");
+    await expect(page.getByText("Page not found")).toBeVisible();
+    // A token the server rejects signs the user out instead of looping.
+    await page.evaluate(() => localStorage.setItem("sentinel.token", "not-a-valid-token"));
+    await page.goto("/alerts");
+    await expect(page).toHaveURL(/\/login/, { timeout: 30_000 });
+  });
+});
+
 test.describe("ministry walkthrough shots", () => {
   test("login, drawer, work detail, keyboard triage, Hindi and light theme", async ({ page }) => {
     const errors = watchConsole(page);
