@@ -13,6 +13,44 @@ District Authorities and Members of Parliament. Everything it surfaces is a
 the implementation risk of works recommended in a constituency, never a
 judgement of the MP.
 
+## What it does
+
+- **Review queue with evidence.** Every work gets a 0-100 risk score from six
+  channels: rules, a proxy model, unsupervised anomaly, expected cost, duplicate
+  or split, and delay. It comes with reasons in English and Hindi, peer cost
+  comparisons, and "what would clear this".
+- **Workflow a ministry can audit.** Alerts move through review, verdicts,
+  escalation and investigation cases with PDF briefs. Every action is on a
+  SHA-256 hash chain.
+- **Four scoped roles.** Ministry, state, district office and MP each see exactly
+  their own works. MP views describe implementation risk of works recommended in
+  the constituency, never a judgement of the Member.
+- **Dashboard pages:**
+  - review: Command Centre, Risk Map, Money at Risk, Alerts, Work detail,
+    Duplicates and splits, Vendor network, Cases
+  - monitoring: Delays, Compliance, Trends, MP Portfolio
+  - model and data: Model Performance, Threshold Simulator, Learning from
+    reviewers, Data Ingest
+  - a public citizen view with no per-work risk
+- **Honest by construction.** Numbers on screen and in the deck come from
+  `models/metrics.json` and the database. The proxy-label caveat and the weakest
+  detector are on every analytical page.
+
+| Measure | Result |
+|---|---|
+| Works scored | 77,312 (₹4,742 crore sanctioned) |
+| Review queue (High + Critical) | 6,456 works, 8.4%; ₹1,085 crore of value |
+| Planted inflated cost found in top 5% of its queue | 79% |
+| Planted duplicates found in top 5% of their queue | 45% |
+| Planted split-work groups flagged at all | **46%, our weakest detector** |
+| Delay model on 27 held-out constituencies | ROC-AUC 0.909, PR-AUC 0.873 |
+| Proxy-label model (learns the rule label, not fraud) | PR-AUC 0.935 out of fold |
+
+Docs: [5-minute demo script](docs/DEMO_SCRIPT.md) ·
+[judge Q&A](docs/JUDGE_QA.md) · [code walkthrough](docs/CODE_WALKTHROUGH.md) ·
+deck `presentation/MPLADS_Sentinel_SIH26102.pptx` (rebuild with
+`python presentation/build_deck.py`).
+
 ## Quick start (demo)
 
 On Windows, after the setup below, one command builds whatever is missing, loads
@@ -54,15 +92,8 @@ Run the whole ML pipeline (about 3 minutes on an RTX 5060):
 python -m ml.train
 ```
 
-Open the demo app:
-
-```bash
-streamlit run demo_app.py
-```
-
-The app only reads what the pipeline already wrote, so run `python -m ml.train`
-at least once first. A 3-minute presentation walkthrough is in
-[docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
+The step-2c Streamlit prototype (`streamlit run demo_app.py`) still works but is
+superseded by the React dashboard below.
 
 Load the results into the application database and start the API (OpenAPI docs
 at http://127.0.0.1:8000/docs):
@@ -121,10 +152,14 @@ reports presentation mode, because those screenshots are committed.
 | `data/processed/` | Parquet artefacts (gitignored) |
 | `configs/` | YAML thresholds and mappings |
 | `ml/` | Data loading, features, detectors, models |
-| `backend/` | FastAPI service |
-| `frontend/` | React dashboard |
-| `models/` | Trained artefacts (gitignored) |
-| `presentation/` | SIH pitch material |
+| `backend/` | FastAPI service, loader, seeds, digest |
+| `frontend/` | React dashboard and Playwright end-to-end tests |
+| `models/` | `metrics.json` and scoring context (trained artefacts are gitignored) |
+| `presentation/` | Deck builder, the deck, and pseudonymised screenshots |
+| `docs/` | Demo script, judge Q&A, code walkthrough |
+| `deploy/`, `docker-compose.yml` | Container setup (untested) |
+| `scripts/` | One-off builders, such as the district boundary file |
+| `demo.ps1`, `Makefile` | One-command demo (the PowerShell script is the verified path) |
 | `tests/` | pytest suite |
 
 ## Progress
@@ -307,3 +342,13 @@ Unhandled server errors return a reference ID instead of a traceback. The
 dashboard shows a banner when the API is unreachable and a reload prompt for a
 stale bundle, and two new end-to-end tests break the API in the browser and
 watch it recover.
+
+**Step 3f — deck and docs.** `presentation/build_deck.py` generates the
+13-slide pitch deck, `MPLADS_Sentinel_SIH26102.pptx`, with speaker notes. It
+reads every figure from `models/metrics.json` and the database at build time and
+places the pseudonymised screenshots. The split-work weakness and the
+proxy-label caveat each have space on a slide.
+
+The docs add a five-minute demo script built on the three guaranteed scenarios,
+twenty judge questions answered with measured numbers, and a code walkthrough
+that follows one work from the spreadsheet to a reviewer's verdict.
