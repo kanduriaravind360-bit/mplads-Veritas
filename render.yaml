@@ -1,0 +1,48 @@
+# Render blueprint (https://render.com/docs/blueprint-spec). UNTESTED: no
+# deployment was made from this repository; see docs/DEPLOY.md for why and for
+# the manual steps. It needs an account, which the build agent could not create.
+services:
+  - type: web
+    name: mplads-sentinel-api
+    runtime: docker
+    dockerfilePath: deploy/api.Dockerfile
+    # The API holds about 330 MB after serving every page; uploads that score new
+    # works load a sentence-transformer on top. 512 MB free plans are too small.
+    plan: standard
+    healthCheckPath: /api/health
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PRESENTATION_MODE
+        value: "1"
+      - key: SCHEDULER_ENABLED
+        value: "0"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mplads-sentinel-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: https://mplads-sentinel-web.onrender.com
+    disk:
+      # data/processed and models are uploaded here once (docs/DEPLOY.md, step 3).
+      name: artefacts
+      mountPath: /app/data
+      sizeGB: 5
+
+  - type: web
+    name: mplads-sentinel-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://mplads-sentinel-api.onrender.com/api/*
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+databases:
+  - name: mplads-sentinel-db
+    plan: basic-256mb
