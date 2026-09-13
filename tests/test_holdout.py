@@ -101,9 +101,13 @@ def test_holdout_parquet_matches_the_config(cfg: dict) -> None:
     if not path.exists() or not config_path.exists():
         pytest.skip("holdout not built in this environment")
 
+    from ml.holdout import record_name
+
     recorded = set(yaml.safe_load(config_path.read_text(encoding="utf-8"))["constituencies"])
     actual = set(pd.read_parquet(path, columns=["constituency"])["constituency"].astype(str))
-    assert actual == recorded
+    # Members' names are recorded as digests; the public record never holds a name.
+    assert {record_name(c) for c in actual} == recorded
+    assert not any(name.lower().startswith(("shri ", "smt ", "dr ")) for name in recorded)
 
 
 # --- the demo works --------------------------------------------------------

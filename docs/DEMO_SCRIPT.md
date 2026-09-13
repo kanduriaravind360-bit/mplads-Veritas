@@ -28,7 +28,7 @@ The three scenarios, all real works from the data:
 
 | Scenario | Where | What it shows |
 |---|---|---|
-| Bhatpara CCTV, `WS/MP18249/2025-2026/187617` and `/187616` | Alerts inbox | A Critical flag a reviewer can **clear**: different police stations and wards, and the cost model priced CCTV against computers |
+| Bhatpara CCTV, `WS/MP18249/2025-2026/187617` and `WS/MP18249/2025-2026/187616` | Alerts inbox | A Critical flag a reviewer can **clear**: different police stations and wards, and the cost model priced CCTV against computers |
 | Madurai split group, 12 road works, ₹1.19 crore | Cases | A textbook split pattern: same agency, same day, each just below a round amount, 8.0 times the peer 90th percentile together |
 | Bokaro | Risk map, Delays | 450 open works, mean delay probability 0.996 |
 

@@ -48,6 +48,7 @@ judgement of the MP.
 
 Docs: [5-minute demo script](docs/DEMO_SCRIPT.md) ·
 [judge Q&A](docs/JUDGE_QA.md) · [code walkthrough](docs/CODE_WALKTHROUGH.md) ·
+[known limitations](docs/KNOWN_LIMITATIONS.md) · [deployment](docs/DEPLOY.md) ·
 deck `presentation/MPLADS_Sentinel_SIH26102.pptx` (rebuild with
 `python presentation/build_deck.py`).
 
@@ -132,6 +133,8 @@ Run the checks:
 ruff check . && pytest
 npm --prefix frontend run typecheck && npm --prefix frontend test
 npm --prefix frontend run e2e
+python scripts/check_numbers.py   # numbers in docs and deck match metrics and the database
+python scripts/privacy_scan.py    # no committed file names a real MP or vendor
 ```
 
 The end-to-end suite builds the production bundle, logs in as each of the four
@@ -249,7 +252,7 @@ than reused, and `score_new_works` rebuilt features from the wrong frame.
 **Step 3a — severe-rule floor, state-relative cost, split routing.** One severe
 rule (completed and fully paid within a day, stalled at an early stage for 612+
 days, or payment stuck) now lifts a work to at least the High cut-off, two to
-Critical. That lifts 2,539 works; High plus Critical goes from 5.0% to 8.4% of
+Critical. That lifts 2,539 works; High plus Critical goes from 5.0% to 8.5% of
 the 73,422 training works, above the ~7% expected, because stalled works add
 1,437. The per-detector injection recall and the holdout delay AUCs are
 unchanged; global rank recall falls (split groups 21.6% to 12.2%), which is the
@@ -352,3 +355,28 @@ proxy-label caveat each have space on a slide.
 The docs add a five-minute demo script built on the three guaranteed scenarios,
 twenty judge questions answered with measured numbers, and a code walkthrough
 that follows one work from the spreadsheet to a reviewer's verdict.
+
+**Step 3g — deployment.** Not deployed: the build machine has no hosting CLI
+and the build agent may not create accounts. `docs/DEPLOY.md` gives measured
+sizing (the API holds about 330 MB, SQLite is 435 MB, so 512 MB free plans are
+too small). An untested Render blueprint is included.
+
+**v1.0 — final QA.** The repository was cloned fresh from GitHub and rebuilt
+from the committed raw workbook: dataset, full pipeline with the injection test
+and holdout (254 seconds), database, and demo seed. All 269 numeric metrics came
+out identical to the committed `metrics.json`.
+
+In the clone, pytest passed, as did `npm ci`, the typecheck, unit tests, the
+production build and `demo.ps1 -Smoke`. The clone also caught a demo-script
+regression from step 3f, now fixed.
+
+Two checks now run as tests:
+
+- `scripts/check_numbers.py`: 19 claims and 50 document checks confirm the
+  README, docs and deck quote the system's own numbers.
+- `scripts/privacy_scan.py`: all 184 tracked files are checked against 16,864
+  real MP and vendor names. It found four Rajya Sabha members' names in the
+  holdout record, which is now written as digests.
+
+[docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) lists what the system does
+not do well.

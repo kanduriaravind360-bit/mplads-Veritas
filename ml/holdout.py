@@ -23,6 +23,7 @@ cannot drift when the data is re-sorted.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -119,6 +120,20 @@ def verify(train: pd.DataFrame, holdout: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+# Rajya Sabha rows hold the member's own name in the constituency field, e.g.
+# "Shri X (2022-28) (2022-2028)". The record is committed to a public repository,
+# so those entries are written as a digest of the name instead of the name.
+_PERSON_LIKE = re.compile(r"^(shri|smt|dr|km|sushri|prof)\b|\(\d{4}-\d{2,4}\)", re.IGNORECASE)
+
+
+def record_name(constituency: str) -> str:
+    """How a held-out constituency is written to the public record."""
+    if _PERSON_LIKE.search(constituency):
+        digest = hashlib.sha256(constituency.strip().encode("utf-8")).hexdigest()[:12]
+        return f"Rajya Sabha member sha256:{digest}"
+    return constituency
+
+
 def write_config(
     names: list[str], checks: dict[str, Any], cfg: dict[str, Any] | None = None
 ) -> Path:
@@ -136,7 +151,7 @@ def write_config(
             "it is identical on any machine and cannot drift."
         ),
         "checks": checks,
-        "constituencies": names,
+        "constituencies": sorted(record_name(n) for n in names),
     }
     path.write_text(
         yaml.safe_dump(payload, sort_keys=False, allow_unicode=True, width=88),
