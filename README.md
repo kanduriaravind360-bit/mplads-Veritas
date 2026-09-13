@@ -1,8 +1,8 @@
-# MPLADS Sentinel
+# MPLADS Veritas
 
 **Smart India Hackathon 2026 — Problem Statement 26102 (MoSPI)**
 
-MPLADS Sentinel is an AI platform that flags anomalies, fraud risk, delays and
+MPLADS Veritas is an AI platform that flags anomalies, fraud risk, delays and
 duplicate works in MPLADS (Member of Parliament Local Area Development Scheme)
 data. It ingests the public eSAKSHI works extract — 77,312 real works across
 both houses of Parliament — scores each work against statistical, rule-based and
